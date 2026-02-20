@@ -1,0 +1,6 @@
+[   52675ms] [ERROR] Dungeon generation failed: QuotaExceededError: Failed to execute 'setItem' on 'Storage': Setting the value of 'dungeon-slop-history' exceeded the quota.
+    at Object.setItem (http://localhost:3000/frontend.js:35673:42)
+    at setItem (http://localhost:3000/frontend.js:35727:20)
+    at http://localhost:3000/frontend.js:35739:12
+    at Object.push (http://localhost:3000/frontend.js:35897:20)
+    at generateDungeonFromConfig (http://localhost:3000/frontend.js:36032:34) @ http://localhost:3000/frontend.js:36039

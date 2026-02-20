@@ -1,0 +1,1940 @@
+/* ============================================================
+   DUNGEON SLOP
+   Clean canvas UI — Excalidraw-inspired light + dark themes
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ===== LIGHT THEME ===== */
+:root,
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-sidebar: #fcfcfc;
+  --bg-surface: #f0f0f0;
+  --bg-input: #ffffff;
+  --bg-hover: #eaeaea;
+  --bg-canvas: #f8f8f8;
+
+  --text: #1b1b1f;
+  --text-2: #4a4a55;
+  --text-3: #9b9ba4;
+
+  --accent: #6965db;
+  --accent-hover: #5753c9;
+  --accent-fg: #fff;
+  --accent-bg: rgba(105, 101, 219, 0.08);
+
+  --border: #e4e4e7;
+  --border-focus: var(--accent);
+
+  --success: #3a8a3a;
+  --error: #d63a3a;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.08);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.1);
+
+  --cell-empty: #f8f8f8;
+  --cell-floor: #e0ddd5;
+  --cell-wall: #7c7c84;
+  --cell-corridor: #d5d2ca;
+  --cell-door: #b08030;
+  --cell-door-ink: #1e1c18;
+  --cell-secret: #8a7040;
+  --cell-stairs-up: #5a9a50;
+  --cell-stairs-down: #9a4a4a;
+  --cell-grid: rgba(0,0,0,0.05);
+  --cell-select: rgba(105,101,219,0.3);
+  --cell-select-stroke: rgba(105,101,219,0.8);
+  --cell-hover-highlight: rgba(105,101,219,0.18);
+  --cell-hover-stroke: rgba(105,101,219,0.6);
+  --cell-room-outline: rgba(0,0,0,0.35);
+}
+
+/* ===== DARK THEME ===== */
+[data-theme="dark"] {
+  --bg: #121212;
+  --bg-sidebar: #181818;
+  --bg-surface: #232329;
+  --bg-input: #181818;
+  --bg-hover: #2a2a32;
+  --bg-canvas: #0f0f0f;
+
+  --text: #e8e8ec;
+  --text-2: #a0a0aa;
+  --text-3: #5c5c66;
+
+  --accent: #8b83f0;
+  --accent-hover: #a39df5;
+  --accent-fg: #121212;
+  --accent-bg: rgba(139, 131, 240, 0.1);
+
+  --border: #2e2e38;
+  --border-focus: var(--accent);
+
+  --success: #5cc05c;
+  --error: #ee5555;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.4);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.5);
+
+  --cell-empty: #0f0f0f;
+  --cell-floor: #2e2e2e;
+  --cell-wall: #1a1a1a;
+  --cell-corridor: #262626;
+  --cell-door: #8a6a20;
+  --cell-door-ink: #e8e4da;
+  --cell-secret: #5a4a20;
+  --cell-stairs-up: #3a6a30;
+  --cell-stairs-down: #6a3030;
+  --cell-grid: rgba(255,255,255,0.03);
+  --cell-select: rgba(139,131,240,0.3);
+  --cell-select-stroke: rgba(139,131,240,0.8);
+  --cell-hover-highlight: rgba(139,131,240,0.2);
+  --cell-hover-stroke: rgba(139,131,240,0.6);
+  --cell-room-outline: rgba(255,255,255,0.2);
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+input, select, textarea {
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+/* Chat textarea resets the global input style */
+.chat-textarea,
+.chat-textarea:focus {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  outline: none;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* ===== LAYOUT ===== */
+
+.app-shell {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+/* ===== SIDEBAR ===== */
+
+.sidebar {
+  width: 320px;
+  min-width: 320px;
+  height: 100%;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 11px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.2px;
+}
+
+.sidebar-new-chat-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--text-3);
+  transition: background 0.12s, color 0.12s;
+}
+
+.sidebar-new-chat-btn:hover {
+  background: var(--bg-surface);
+  color: var(--text);
+}
+
+/* ── Session history ── */
+
+.session-panel {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.session-panel-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  transition: background 0.1s;
+}
+
+.session-panel-toggle:hover {
+  background: var(--bg-surface);
+}
+
+.session-panel-chevron {
+  font-size: 9px;
+}
+
+.session-list {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 4px 6px 6px;
+}
+
+.session-item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.session-item:hover {
+  background: var(--bg-hover);
+}
+
+.session-item-label {
+  font-size: 12px;
+  color: var(--text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item-time {
+  font-size: 11px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+/* ── Chat area ── */
+
+.chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* critical: lets flex children scroll */
+  overflow: hidden;
+}
+
+.chat-thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.chat-empty-state p {
+  font-size: 13px;
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+/* ── Chat message bubbles ── */
+
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 86%;
+}
+
+.chat-msg--user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.chat-msg--assistant {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.chat-msg-bubble {
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.chat-msg--user .chat-msg-bubble {
+  background: var(--accent-bg);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 16px 16px 4px 16px;
+}
+
+.chat-msg--assistant .chat-msg-bubble {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 4px 16px 16px 16px;
+  color: var(--text);
+}
+
+.chat-msg-bubble--loading {
+  min-width: 80px;
+}
+
+.chat-typing {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.chat-streaming-text {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.chat-msg-actions {
+  margin-top: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.chat-msg--user:hover .chat-msg-actions {
+  opacity: 1;
+}
+
+.chat-msg-edit-btn {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 1px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+
+.chat-msg-edit-btn:hover:not(:disabled) {
+  background: var(--bg-surface);
+  border-color: var(--border);
+  color: var(--text-2);
+}
+
+.chat-msg-edit-btn:disabled {
+  cursor: default;
+}
+
+/* ── Config card ── */
+
+.chat-config-card {
+  align-self: stretch;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.chat-config-card-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 12px;
+  background: var(--bg-surface);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.chat-config-card-header:hover {
+  background: var(--bg-hover);
+}
+
+.chat-config-card .config-readout {
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Clarification hint ── */
+
+.chat-clarification-hint {
+  align-self: center;
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 4px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  margin-top: 2px;
+}
+
+/* ── Compose zone ── */
+
+.chat-compose {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 10px 10px 10px;
+  background: var(--bg-sidebar);
+}
+
+.chat-compose-inner {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px 6px 6px 10px;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.chat-compose-inner:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.chat-textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  box-shadow: none;
+  min-height: 20px;
+  max-height: 120px;
+  overflow-y: auto;
+  color: var(--text);
+}
+
+.chat-textarea::placeholder {
+  color: var(--text-3);
+}
+
+.chat-textarea:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.chat-send-btn {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  transition: background 0.12s, opacity 0.12s;
+  border: none;
+  cursor: pointer;
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.chat-send-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Rooms panel ── */
+
+.sidebar-rooms {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  max-height: 300px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-rooms-toggle {
+  flex-shrink: 0;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  transition: background 0.1s;
+}
+
+.sidebar-rooms-toggle:hover {
+  background: var(--bg-surface);
+}
+
+.sidebar-rooms-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 10px 10px;
+}
+
+/* kept for compatibility */
+.sidebar-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+
+/* ===== MAIN AREA ===== */
+
+.main-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== TOOLBAR ===== */
+
+.toolbar {
+  height: 46px;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 4px;
+  justify-content: space-between;
+}
+
+.toolbar-left,
+.toolbar-center,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.toolbar-zoom-label {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-3);
+  min-width: 36px;
+  text-align: center;
+}
+
+/* Seed control group */
+.seed-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+}
+
+.seed-control-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+.seed-control-input {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  width: 100px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+/* ===== CANVAS ===== */
+
+.canvas-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-canvas);
+}
+
+.dungeon-canvas-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.dungeon-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+
+.dungeon-canvas:active {
+  cursor: grabbing;
+}
+
+.canvas-empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.canvas-empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.canvas-empty-subtitle {
+  font-size: 14px;
+  color: var(--text-3);
+}
+
+/* ===== BUTTONS ===== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 120ms;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: var(--bg-surface);
+  border-color: var(--border);
+  color: var(--text-2);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-md {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+.btn-icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--text-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon:hover {
+  background: var(--bg-surface);
+  color: var(--text);
+}
+
+/* ===== SELECT ===== */
+
+.select-wrapper {
+  margin-bottom: 14px;
+}
+
+.select-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 5px;
+}
+
+.select {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%239b9ba4' d='M1 3l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+  cursor: pointer;
+}
+
+.select option {
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+/* ===== SLIDER ===== */
+
+.slider-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.slider-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.slider-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--bg-surface);
+  border-radius: 2px;
+  border: none;
+  padding: 0;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ===== PROMPT (legacy, kept for compatibility) ===== */
+
+/* ===== CONFIG READOUT ===== */
+
+.config-readout {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.config-readout--empty {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.config-readout-placeholder {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.config-readout--streaming {
+  background: var(--bg-surface);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.config-raw-text {
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-2);
+  margin: 0;
+}
+
+.config-raw-text.pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.config-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.config-field:last-child {
+  border-bottom: none;
+}
+
+.config-field-key {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.config-field-value {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.config-field--block {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.config-field-select {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  outline: none;
+  max-width: 160px;
+}
+
+.config-field-select:focus {
+  outline: 1px solid var(--accent);
+  border-radius: 3px;
+}
+
+.config-field-number {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: right;
+  padding: 0 2px;
+  outline: none;
+  width: 80px;
+}
+
+.config-field-number:focus {
+  outline: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg);
+}
+
+.config-field-textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 6px 8px;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+
+.config-field-textarea:focus {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+.config-field-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.config-field-chip {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-2);
+  cursor: pointer;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  user-select: none;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+
+.config-field-chip:has(input:checked) {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.config-field-chip input {
+  display: none;
+}
+
+/* ===== CONVERSATION (replaced by chat-msg styles above) ===== */
+
+/* ===== EDIT TOOL PALETTE ===== */
+
+.edit-tool-palette {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px;
+  z-index: 20;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+}
+
+.edit-tool-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 11px;
+  font-family: inherit;
+  padding: 5px 8px;
+  text-align: left;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 96px;
+}
+
+.edit-tool-btn:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.edit-tool-btn--active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.edit-tool-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 2px;
+}
+
+.edit-tool-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.edit-tool-status--locked {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.edit-tool-status--auto {
+  background: var(--bg);
+  color: var(--text-3);
+  border: 1px solid var(--border);
+}
+
+.edit-tool-status-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.edit-tool-unlock-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 1px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.edit-tool-unlock-btn:hover { opacity: 1; }
+
+.edit-tool-hint {
+  font-size: 10px;
+  color: var(--text-3);
+  padding: 1px 6px 3px;
+  text-align: center;
+}
+
+/* Cursor per tool */
+.dungeon-canvas-wrapper[data-tool="paint"] { cursor: cell; }
+.dungeon-canvas-wrapper[data-tool="door"] { cursor: cell; }
+.dungeon-canvas-wrapper[data-tool="locked_door"] { cursor: cell; }
+.dungeon-canvas-wrapper[data-tool="secret_door"] { cursor: cell; }
+.dungeon-canvas-wrapper[data-tool="trap"] { cursor: cell; }
+.dungeon-canvas-wrapper[data-tool="treasure"] { cursor: cell; }
+.dungeon-canvas-wrapper[data-tool="stairs_up"] { cursor: cell; }
+.dungeon-canvas-wrapper[data-tool="stairs_down"] { cursor: cell; }
+.dungeon-canvas-wrapper[data-tool="room"] { cursor: crosshair; }
+.dungeon-canvas-wrapper[data-tool="erase"] { cursor: crosshair; }
+.dungeon-canvas-wrapper[data-tool="select"] { cursor: grab; }
+.dungeon-canvas-wrapper[data-tool="select"]:active { cursor: grabbing; }
+
+/* ===== CLARIFICATION ===== */
+
+.clarification-block {
+  margin-top: 2px;
+}
+
+.clarification-question {
+  font-size: 13px;
+  color: var(--accent);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.clarification-input {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.clarification-text-input {
+  flex: 1;
+}
+
+/* ===== SETTINGS POPOVER ===== */
+
+.settings-popover {
+  position: absolute;
+  top: 46px;
+  right: 8px;
+  width: 280px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+  padding: 14px 16px;
+}
+
+.settings-popover-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.settings-popover-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.settings-popover-close {
+  font-size: 18px;
+  color: var(--text-3);
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.settings-popover-close:hover {
+  color: var(--text);
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-section {
+  margin-bottom: 0;
+}
+
+.settings-heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+
+/* ===== ROOM PANEL ===== */
+
+.room-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.room-panel--empty {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.room-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.room-panel-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+/* Describe progress (in sidebar) */
+.describe-progress {
+  padding: 10px;
+  background: var(--bg-surface);
+  border-radius: 8px;
+}
+
+.describe-progress-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.describe-progress-count {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 600;
+}
+
+.describe-progress-bar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.describe-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.describe-progress-stream {
+  margin-top: 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: var(--text-3);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 50px;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+/* Room list */
+.room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.room-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+  text-align: left;
+  width: 100%;
+}
+
+.room-list-item:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.room-list-item--described {
+  border-left: 3px solid var(--success);
+}
+
+.room-list-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.room-list-item-check {
+  color: var(--success);
+  font-size: 11px;
+}
+
+.room-list-item-size {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* Room detail */
+.room-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.room-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-detail-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.room-detail-description {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.room-detail-section {
+  margin-top: 2px;
+}
+
+.room-detail-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.room-detail-list {
+  list-style: disc;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.room-detail-notes {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.room-detail-empty {
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* ─── Room edit form ─── */
+
+.room-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.room-edit-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.room-edit-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-3);
+  opacity: 0.7;
+}
+
+.room-edit-input,
+.room-edit-textarea {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 6px 8px;
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.room-edit-input:focus,
+.room-edit-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle, rgba(99,102,241,0.15));
+}
+
+.room-edit-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* ─── Export panel ─── */
+
+.export-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.export-panel-heading {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.export-panel-heading--section {
+  margin-top: 6px;
+}
+
+.export-panel-empty {
+  font-size: 12px;
+  color: var(--text-3);
+  margin: 0;
+}
+
+.export-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.export-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.export-option-description {
+  font-size: 12px;
+  color: var(--text-2);
+  margin: 0;
+  flex: 1;
+}
+
+.export-popover {
+  width: 320px;
+}
+
+/* ===== MAP LEGEND (canvas-anchored) ===== */
+
+.map-legend {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  padding: 10px 14px;
+  z-index: 50;
+  pointer-events: none;
+  min-width: 130px;
+}
+
+.map-legend-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.map-legend-items {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.map-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.map-legend-icon {
+  width: 14px;
+  height: 14px;
+  font-size: 12px;
+  line-height: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.map-legend-label {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.map-legend-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 0;
+}
+
+/* ===== EXPORT ACTIONS (canvas-anchored) ===== */
+
+.export-actions {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  display: flex;
+  gap: 4px;
+  z-index: 50;
+}
+
+/* ===== ACTIVITY TOAST (canvas-anchored) ===== */
+
+.activity-toast {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  width: 280px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  padding: 12px 14px;
+  z-index: 50;
+}
+
+.activity-toast-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.activity-toast-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+.activity-toast-count {
+  margin-left: auto;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.activity-toast-bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.activity-toast-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.activity-toast-preview {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.4;
+  max-height: 40px;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* ===== SVG OVERLAY ===== */
+
+.svg-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.corridor-label-bg {
+  fill: var(--cell-corridor, #c8bca2);
+  stroke: var(--border, rgba(0,0,0,0.18));
+  stroke-width: 0.5px;
+  opacity: 0.92;
+}
+
+.corridor-label-text {
+  fill: var(--text, #333);
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+  dominant-baseline: central;
+  user-select: none;
+}
+
+[data-theme="dark"] .corridor-label-bg {
+  fill: var(--cell-corridor, #6b6350);
+}
+
+[data-theme="dark"] .corridor-label-text {
+  fill: var(--text, #e8e0d0);
+}
+
+/* ===== TOOLTIP ===== */
+
+.room-tooltip {
+  position: fixed;
+  padding: 8px 12px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  z-index: 100;
+  max-width: 240px;
+}
+
+.room-tooltip h4,
+.room-tooltip-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.room-tooltip p,
+.room-tooltip-description {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+
+/* ===== SPINNER ===== */
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  display: inline-block;
+}
+
+/* ===== ANIMATIONS ===== */
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ===== ERROR BANNER ===== */
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: color-mix(in srgb, var(--error) 12%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--error) 30%, var(--border));
+  color: var(--error);
+  font-size: 13px;
+  gap: 12px;
+}
+
+.error-banner-text {
+  flex: 1;
+  word-break: break-word;
+}
+
+.error-banner-dismiss {
+  font-size: 18px;
+  color: var(--error);
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.error-banner-dismiss:hover {
+  opacity: 1;
+}
+
+/* ===== ROOM ENTRIES (structured description) ===== */
+
+.room-entries-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.room-entry-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.room-entry-direction {
+  font-weight: 700;
+  color: var(--text);
+  min-width: 44px;
+}
+
+.room-entry-door {
+  color: var(--text-2);
+}
+
+.room-entry-leads {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.room-entry-trap {
+  color: var(--error);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.room-detail-hidden-treasure {
+  font-size: 12px;
+  color: var(--text-2);
+  font-style: italic;
+  margin: 4px 0 0;
+}
+
+.room-detail-list--trap li,
+.room-detail-list--trick li {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.room-detail-list--trap li::before {
+  content: "⚠ ";
+  color: var(--error);
+}
+
+.room-detail-list--trick li::before {
+  content: "✦ ";
+  color: var(--accent);
+}
+
+.room-detail-empty-tag {
+  font-size: 12px;
+  color: var(--text-3);
+  font-style: italic;
+  margin: 4px 0;
+}
+
+/* ===== DUNGEON PANEL (general section) ===== */
+
+.dungeon-panel {
+  padding: 8px 0 4px;
+}
+
+.dungeon-panel--empty {
+  padding: 12px 16px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.dungeon-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 16px 8px;
+  gap: 8px;
+}
+
+.dungeon-panel-heading {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.dungeon-panel-empty {
+  padding: 8px 16px 12px;
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.dungeon-panel-loading {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.dungeon-panel-section {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.dungeon-panel-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 5px;
+}
+
+.dungeon-panel-text {
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.dungeon-panel-stats {
+  padding: 6px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dungeon-panel-stat {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.dungeon-panel-stat-label {
+  font-weight: 600;
+  color: var(--text-3);
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.dungeon-panel-stat-value {
+  color: var(--text-2);
+}
+
+.dungeon-panel-list {
+  list-style: disc;
+  padding-left: 16px;
+  margin: 0;
+}
+
+.dungeon-panel-list li {
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+  padding: 1px 0;
+}
+
+/* ===== CORRIDOR FEATURES LIST ===== */
+
+.corridor-features-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.corridor-feature-item {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.corridor-feature-label {
+  font-weight: 700;
+  color: var(--accent);
+  min-width: 16px;
+  flex-shrink: 0;
+}
+
+.corridor-feature-desc {
+  color: var(--text-2);
+}

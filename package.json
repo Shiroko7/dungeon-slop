@@ -1,0 +1,26 @@
+{
+  "name": "dungeon-slop",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19",
+    "@types/react-dom": "^19"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "jspdf": "^2",
+    "react": "^19",
+    "react-dom": "^19",
+    "zod": "^3",
+    "zustand": "^5"
+  }
+}
