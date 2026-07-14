@@ -3,9 +3,7 @@ import { useDungeonStore } from "../../store/dungeon-store.ts";
 import { useUIStore } from "../../store/ui-store.ts";
 import { Button } from "../shared/Button.tsx";
 
-const ZOOM_STEP = 0.1;
-const ZOOM_MIN = 0.2;
-const ZOOM_MAX = 3;
+const ZOOM_BTN_FACTOR = 1.2;
 
 export function Toolbar() {
   const config = useDungeonStore((s) => s.config);
@@ -19,7 +17,9 @@ export function Toolbar() {
   const canRedo = useDungeonStore((s) => s._redoStack.length > 0);
 
   const zoom = useUIStore((s) => s.zoom);
-  const setZoom = useUIStore((s) => s.setZoom);
+  const zoomAtAnchor = useUIStore((s) => s.zoomAtAnchor);
+  const canvasW = useUIStore((s) => s.canvasW);
+  const canvasH = useUIStore((s) => s.canvasH);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const resetView = useUIStore((s) => s.resetView);
   const darkMode = useUIStore((s) => s.darkMode);
@@ -53,13 +53,14 @@ export function Toolbar() {
     }
   }, [config, isGeneratingDungeon, seedInput, rerollDungeon]);
 
+  // Toolbar zoom anchors at the viewport center
   const handleZoomIn = useCallback(() => {
-    setZoom(Math.min(zoom + ZOOM_STEP, ZOOM_MAX));
-  }, [zoom, setZoom]);
+    zoomAtAnchor(canvasW / 2, canvasH / 2, ZOOM_BTN_FACTOR);
+  }, [zoomAtAnchor, canvasW, canvasH]);
 
   const handleZoomOut = useCallback(() => {
-    setZoom(Math.max(zoom - ZOOM_STEP, ZOOM_MIN));
-  }, [zoom, setZoom]);
+    zoomAtAnchor(canvasW / 2, canvasH / 2, 1 / ZOOM_BTN_FACTOR);
+  }, [zoomAtAnchor, canvasW, canvasH]);
 
   return (
     <div className="toolbar">

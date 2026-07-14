@@ -647,16 +647,25 @@ export function getRoomAtCell(
  * Pre-render the dungeon floor plan onto an OffscreenCanvas.
  * Callers blit this with ctx.drawImage() during pan/zoom for near-zero CPU cost.
  * The buffer includes the full floor + walls + grid dots but NOT interactive overlays.
+ *
+ * `scale` multiplies the buffer's pixel resolution (e.g. devicePixelRatio) while
+ * all drawing stays in world CSS-px coordinates; blit with 9-arg drawImage back
+ * to `width*cellSize × height*cellSize` world units.
  */
 export function buildDungeonBuffer(
   dungeon: Dungeon,
   cellSize: number,
   theme: ThemePalette,
+  scale = 1,
 ): OffscreenCanvas {
-  const buf = new OffscreenCanvas(dungeon.width * cellSize, dungeon.height * cellSize);
+  const buf = new OffscreenCanvas(
+    Math.ceil(dungeon.width * cellSize * scale),
+    Math.ceil(dungeon.height * cellSize * scale),
+  );
   const ctx = buf.getContext("2d") as unknown as CanvasRenderingContext2D;
+  ctx.scale(scale, scale);
   ctx.fillStyle = theme.wall;
-  ctx.fillRect(0, 0, buf.width, buf.height);
+  ctx.fillRect(0, 0, dungeon.width * cellSize, dungeon.height * cellSize);
   renderFloorPlan(ctx, dungeon, cellSize, theme, true);
   return buf;
 }

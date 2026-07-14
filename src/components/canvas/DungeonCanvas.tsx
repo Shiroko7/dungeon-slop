@@ -285,6 +285,9 @@ export function DungeonCanvas() {
   // Dungeon buffer
   const dungeonBuffer    = useRef<OffscreenCanvas | null>(null);
   const dungeonBufferFor = useRef<Dungeon | null>(null);
+  const bufferScaleRef   = useRef(1);
+  // Canvas viewport: CSS size + devicePixelRatio (backing store is device px)
+  const viewRef          = useRef({ cssW: 0, cssH: 0, dpr: 1 });
   const cellColorsRef    = useRef<CellColors>(getCellColors());
   const themeRef         = useRef<ThemePalette>(getTheme("Default"));
   const rafHandle        = useRef<number>(0);
@@ -312,11 +315,13 @@ export function DungeonCanvas() {
   useEffect(() => {
     if (!dungeon) { dungeonBuffer.current = null; dungeonBufferFor.current = null; return; }
     const theme = getTheme(dungeon.config.motif);
-    dungeonBuffer.current = buildDungeonBuffer(dungeon, CELL_SIZE, theme);
+    const scale = window.devicePixelRatio || 1;
+    dungeonBuffer.current = buildDungeonBuffer(dungeon, CELL_SIZE, theme, scale);
+    bufferScaleRef.current = scale;
     dungeonBufferFor.current = dungeon;
   }, [dungeon]);
 
-  // ── Resize canvas ──────────────────────────────────────────────────────────
+  // ── Resize canvas (backing store in device px, layout stays CSS-driven) ───
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -324,10 +329,23 @@ export function DungeonCanvas() {
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
-      canvas.width  = entry.contentRect.width;
-      canvas.height = entry.contentRect.height;
+      const cssW = entry.contentRect.width;
+      const cssH = entry.contentRect.height;
+      const dpr = window.devicePixelRatio || 1;
+      const box = entry.devicePixelContentBoxSize?.[0];
+      const dw = box ? box.inlineSize : Math.round(cssW * dpr);
+      const dh = box ? box.blockSize  : Math.round(cssH * dpr);
+      canvas.width  = dw;
+      canvas.height = dh;
+      viewRef.current = { cssW, cssH, dpr: cssW > 0 ? dw / cssW : dpr };
+      useUIStore.getState().setCanvasSize(cssW, cssH);
     });
-    observer.observe(container);
+    // device-pixel-content-box also fires on devicePixelRatio changes
+    try {
+      observer.observe(container, { box: "device-pixel-content-box" });
+    } catch {
+      observer.observe(container);
+    }
     return () => observer.disconnect();
   }, []);
 
@@ -353,10 +371,30 @@ export function DungeonCanvas() {
 
       const d = useDungeonStore.getState().dungeon;
 
+      // DPR can change without a resize event (window moved across monitors)
+      const dpr = window.devicePixelRatio || 1;
+      const view = viewRef.current;
+      if (dpr !== view.dpr && view.cssW > 0) {
+        canvas.width  = Math.round(view.cssW * dpr);
+        canvas.height = Math.round(view.cssH * dpr);
+        view.dpr = dpr;
+      }
+      const cssW = view.cssW || canvas.width / view.dpr;
+      const cssH = view.cssH || canvas.height / view.dpr;
+      // All drawing below happens in CSS-px coordinates on a device-px store
+      ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+
       if (!d) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, cssW, cssH);
         rafHandle.current = requestAnimationFrame(frame);
         return;
+      }
+
+      // Rebuild the buffer if DPR changed since it was built
+      if (dungeonBuffer.current && bufferScaleRef.current !== view.dpr) {
+        dungeonBuffer.current = buildDungeonBuffer(d, CELL_SIZE, themeRef.current, view.dpr);
+        bufferScaleRef.current = view.dpr;
+        dungeonBufferFor.current = d;
       }
 
       const theme  = themeRef.current;
@@ -366,15 +404,22 @@ export function DungeonCanvas() {
       const hidden = hiddenSetRef.current;
 
       ctx.fillStyle = theme.wall;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, cssW, cssH);
 
       ctx.save();
       ctx.translate(panX, panY);
       ctx.scale(zoom, zoom);
 
-      // Blit the static pre-rendered buffer (fast GPU drawImage)
+      // Blit the static pre-rendered buffer (fast GPU drawImage).
+      // The buffer is rendered at bufferScale× resolution; map it back to
+      // world CSS-px size so the transform stays scale-agnostic.
       if (dungeonBuffer.current) {
-        ctx.drawImage(dungeonBuffer.current, 0, 0);
+        const buf = dungeonBuffer.current;
+        ctx.drawImage(
+          buf,
+          0, 0, buf.width, buf.height,
+          0, 0, d.width * CELL_SIZE, d.height * CELL_SIZE,
+        );
       } else {
         renderFloorPlan(ctx, d, CELL_SIZE, theme, false);
       }
@@ -639,9 +684,14 @@ export function DungeonCanvas() {
     if (!canvas) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const { zoom, setZoom } = useUIStore.getState();
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      setZoom(Math.max(0.2, Math.min(3, zoom + delta)));
+      const rect = canvas.getBoundingClientRect();
+      // Multiplicative, anchored at the cursor: the grid point under the
+      // pointer stays fixed while zooming.
+      useUIStore.getState().zoomAtAnchor(
+        e.clientX - rect.left,
+        e.clientY - rect.top,
+        Math.exp(-e.deltaY * 0.0012),
+      );
     };
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", onWheel);
