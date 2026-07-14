@@ -51,17 +51,78 @@ function carveSquare(x: number, y: number, w: number, h: number): Set<string> {
   return carveRectangular(ox, oy, side, side);
 }
 
+// ─── Inclusive intersection helpers ──────────────────────────────────────────
+// For every cell we test 5 sample points (4 corners + center). If ANY falls
+// inside the shape, the cell is carved. All shape formulas exactly mirror the
+// renderer's geometry (room-shapes.ts) so grid ownership matches visual output.
+
+// ── Circle (matches renderer: r = min(w, h) / 2) ─────────────────────────────
+
+function pointInCircle(sx: number, sy: number, cx: number, cy: number, r: number): boolean {
+  const dx = sx - cx, dy = sy - cy;
+  return dx * dx + dy * dy <= r * r;
+}
+
+function cellIntersectsCircle(px: number, py: number, cx: number, cy: number, r: number): boolean {
+  return (
+    pointInCircle(px,       py,       cx, cy, r) ||
+    pointInCircle(px + 1,   py,       cx, cy, r) ||
+    pointInCircle(px,       py + 1,   cx, cy, r) ||
+    pointInCircle(px + 1,   py + 1,   cx, cy, r) ||
+    pointInCircle(px + 0.5, py + 0.5, cx, cy, r)
+  );
+}
+
+// ── Diamond (matches renderer: r = min(w, h) / 2) ────────────────────────────
+
+function pointInDiamond(sx: number, sy: number, cx: number, cy: number, r: number): boolean {
+  return Math.abs(sx - cx) + Math.abs(sy - cy) <= r;
+}
+
+function cellIntersectsDiamond(px: number, py: number, cx: number, cy: number, r: number): boolean {
+  return (
+    pointInDiamond(px,       py,       cx, cy, r) ||
+    pointInDiamond(px + 1,   py,       cx, cy, r) ||
+    pointInDiamond(px,       py + 1,   cx, cy, r) ||
+    pointInDiamond(px + 1,   py + 1,   cx, cy, r) ||
+    pointInDiamond(px + 0.5, py + 0.5, cx, cy, r)
+  );
+}
+
+// ── Convex polygon (hexagonal, pentagonal) ────────────────────────────────────
+// Vertices must be in CLOCKWISE order in screen space (y increases downward).
+// For each directed edge A→B, interior points satisfy:
+//   (B.x - A.x) * (P.y - A.y) - (B.y - A.y) * (P.x - A.x) >= 0
+
+type Pt = { x: number; y: number };
+
+function pointInConvexPolygon(sx: number, sy: number, verts: Pt[]): boolean {
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i]!;
+    const b = verts[(i + 1) % verts.length]!;
+    if ((b.x - a.x) * (sy - a.y) - (b.y - a.y) * (sx - a.x) < 0) return false;
+  }
+  return true;
+}
+
+function cellIntersectsConvexPolygon(px: number, py: number, verts: Pt[]): boolean {
+  return (
+    pointInConvexPolygon(px,       py,       verts) ||
+    pointInConvexPolygon(px + 1,   py,       verts) ||
+    pointInConvexPolygon(px,       py + 1,   verts) ||
+    pointInConvexPolygon(px + 1,   py + 1,   verts) ||
+    pointInConvexPolygon(px + 0.5, py + 0.5, verts)
+  );
+}
+
 function carveCircular(x: number, y: number, w: number, h: number): Set<string> {
   const cells = new Set<string>();
   const cx = x + w / 2;
   const cy = y + h / 2;
-  const rx = (w - 1) / 2;
-  const ry = (h - 1) / 2;
+  const r  = Math.min(w, h) / 2; // matches renderer: r = min(boundsW, boundsH) / 2 / cellSize
   for (let py = y; py < y + h; py++) {
     for (let px = x; px < x + w; px++) {
-      const dx = (px + 0.5 - cx) / rx;
-      const dy = (py + 0.5 - cy) / ry;
-      if (dx * dx + dy * dy <= 1) {
+      if (cellIntersectsCircle(px, py, cx, cy, r)) {
         cells.add(`${px},${py}`);
       }
     }
@@ -74,14 +135,21 @@ function carveHexagonal(x: number, y: number, w: number, h: number): Set<string>
   const cells = new Set<string>();
   const cx = x + w / 2;
   const cy = y + h / 2;
-  const rx = (w - 1) / 2;
-  const ry = (h - 1) / 2;
+  // Matches renderer: r = min(boundsW / sqrt(3), boundsH / 2) in grid units
+  const r  = Math.min(w / Math.sqrt(3), h / 2);
+  const hw = (r * Math.sqrt(3)) / 2;
+  // Pointy-top hexagon vertices in CW order (screen coords, y-down)
+  const verts: Pt[] = [
+    { x: cx,      y: cy - r      },  // top
+    { x: cx + hw, y: cy - r / 2  },  // top-right
+    { x: cx + hw, y: cy + r / 2  },  // bottom-right
+    { x: cx,      y: cy + r      },  // bottom
+    { x: cx - hw, y: cy + r / 2  },  // bottom-left
+    { x: cx - hw, y: cy - r / 2  },  // top-left
+  ];
   for (let py = y; py < y + h; py++) {
     for (let px = x; px < x + w; px++) {
-      const dx = Math.abs(px + 0.5 - cx) / rx;
-      const dy = Math.abs(py + 0.5 - cy) / ry;
-      // Hexagonal clip: manhattan-ish distance
-      if (dx + dy * 0.5 <= 1 && dy <= 1) {
+      if (cellIntersectsConvexPolygon(px, py, verts)) {
         cells.add(`${px},${py}`);
       }
     }
@@ -93,14 +161,18 @@ function carveHexagonal(x: number, y: number, w: number, h: number): Set<string>
 function carvePentagonal(x: number, y: number, w: number, h: number): Set<string> {
   const cells = new Set<string>();
   const cx = x + w / 2;
-  // Pointed top, flat bottom
+  const cy = y + h / 2;
+  // Matches renderer: r = min(boundsW / 1.902, boundsH / 1.809) in grid units
+  const r = Math.min(w / 1.902, h / 1.809);
+  // Regular pentagon, pointed top; vertices in CW order (screen coords, y-down)
+  const verts: Pt[] = [];
+  for (let i = 0; i < 5; i++) {
+    const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+    verts.push({ x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) });
+  }
   for (let py = y; py < y + h; py++) {
-    const t = (py - y) / (h - 1); // 0 at top, 1 at bottom
-    // Width grows from point to full width at ~40%, then stays full
-    const widthFraction = t < 0.4 ? t / 0.4 : 1;
-    const halfW = (w * widthFraction) / 2;
     for (let px = x; px < x + w; px++) {
-      if (Math.abs(px + 0.5 - cx) <= halfW) {
+      if (cellIntersectsConvexPolygon(px, py, verts)) {
         cells.add(`${px},${py}`);
       }
     }
@@ -179,11 +251,13 @@ function carveCave(x: number, y: number, w: number, h: number, rng: SeededRandom
 
 function carveCross(x: number, y: number, w: number, h: number): Set<string> {
   const cells = new Set<string>();
-  // Horizontal strip (middle third of height, full width)
-  const hStripH = Math.max(2, Math.floor(h / 3));
+  // Use min(w,h) for both bars so the cross is symmetric regardless of room aspect ratio
+  const barThickness = Math.max(2, Math.floor(Math.min(w, h) / 3));
+  // Horizontal strip (full width, equal-thickness bar centered vertically)
+  const hStripH = barThickness;
   const hStripY = y + Math.floor((h - hStripH) / 2);
-  // Vertical strip (middle third of width, full height)
-  const vStripW = Math.max(2, Math.floor(w / 3));
+  // Vertical strip (equal-thickness bar centered horizontally, full height)
+  const vStripW = barThickness;
   const vStripX = x + Math.floor((w - vStripW) / 2);
 
   for (let py = hStripY; py < hStripY + hStripH; py++) {
@@ -203,13 +277,10 @@ function carveDiamond(x: number, y: number, w: number, h: number): Set<string> {
   const cells = new Set<string>();
   const cx = x + w / 2;
   const cy = y + h / 2;
-  const rx = (w - 1) / 2;
-  const ry = (h - 1) / 2;
+  const r  = Math.min(w, h) / 2; // matches renderer: r = min(boundsW, boundsH) / 2 / cellSize
   for (let py = y; py < y + h; py++) {
     for (let px = x; px < x + w; px++) {
-      const dx = Math.abs(px + 0.5 - cx) / rx;
-      const dy = Math.abs(py + 0.5 - cy) / ry;
-      if (dx + dy <= 1) {
+      if (cellIntersectsDiamond(px, py, cx, cy, r)) {
         cells.add(`${px},${py}`);
       }
     }

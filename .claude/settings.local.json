@@ -53,7 +53,17 @@
       "mcp__plugin_playwright_playwright__browser_console_messages",
       "mcp__plugin_playwright_playwright__browser_evaluate",
       "mcp__plugin_playwright_playwright__browser_press_key",
-      "mcp__plugin_playwright_playwright__browser_install"
+      "mcp__plugin_playwright_playwright__browser_install",
+      "Bash(head:*)",
+      "mcp__plugin_playwright_playwright__browser_fill_form",
+      "Bash(rm:*)",
+      "Bash(sed:*)",
+      "Bash(git stash:*)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:slsdo.github.io)",
+      "WebFetch(domain:journal.stuffwithstuff.com)",
+      "WebFetch(domain:www.gamedeveloper.com)",
+      "mcp__plugin_playwright_playwright__browser_network_requests"
     ]
   },
   "enabledPlugins": {

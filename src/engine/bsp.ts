@@ -41,17 +41,25 @@ function getRoomSizeRange(sizeConfig: string, gridScale: number): { min: number;
   };
 }
 
-function getDensityMargin(layoutConfig: string): number {
-  switch (layoutConfig) {
+function getDensityMargin(densityConfig: string): number {
+  switch (densityConfig) {
     case "Sparse":
       return 0.4;
     case "Moderate":
       return 0.25;
     case "Dense":
       return 0.1;
+    case "Exact":
+      return 0.25; // Exact uses Moderate margin; user controls count separately
     default:
       return 0.25;
   }
+}
+
+function getRoomCountFromDensity(density: string, gridW: number, gridH: number): number {
+  const area = gridW * gridH;
+  const factor = density === "Sparse" ? 2000 : density === "Moderate" ? 1000 : 500;
+  return Math.max(3, Math.min(50, Math.round(area / factor)));
 }
 
 function splitNode(
@@ -134,6 +142,41 @@ function collectLeaves(node: BSPNode): BSPNode[] {
   return leaves;
 }
 
+function applySymmetry(rooms: Room[], symmetry: string, gridW: number, gridH: number): void {
+  const origCount = rooms.length;
+
+  const makeRoom = (r: Room, x: number, y: number): Room => ({
+    id: rooms.length,
+    x,
+    y,
+    width: r.width,
+    height: r.height,
+    centerX: Math.floor(x + r.width / 2),
+    centerY: Math.floor(y + r.height / 2),
+    shape: r.shape,
+    connections: [],
+    features: [],
+  });
+
+  for (let i = 0; i < origCount; i++) {
+    const r = rooms[i]!;
+    const mx = gridW - r.x - r.width;
+    const my = gridH - r.y - r.height;
+
+    if (symmetry === "Horizontal") {
+      rooms.push(makeRoom(r, mx, r.y));
+    } else if (symmetry === "Vertical") {
+      rooms.push(makeRoom(r, r.x, my));
+    } else if (symmetry === "Radial") {
+      rooms.push(makeRoom(r, mx, my));
+    } else if (symmetry === "Four-Way") {
+      rooms.push(makeRoom(r, mx, r.y));      // H-mirror
+      rooms.push(makeRoom(r, r.x, my));      // V-mirror
+      rooms.push(makeRoom(r, mx, my));       // HV-mirror
+    }
+  }
+}
+
 export function generateBSP(
   width: number,
   height: number,
@@ -142,15 +185,28 @@ export function generateBSP(
 ): Room[] {
   const gridScale = Math.min(width, height);
   const sizeRange = getRoomSizeRange(config.room_size, gridScale);
-  const targetCount = config.room_count;
-  const densityMargin = getDensityMargin(config.room_layout);
+  const targetCount = config.room_density === "Exact"
+    ? (config.room_count ?? 10)
+    : getRoomCountFromDensity(config.room_density, width, height);
+  const densityMargin = getDensityMargin(config.room_density);
   const minLeafSize = sizeRange.min + 2;
+
+  // Restrict root bounds to half the space for symmetric layouts so mirrored
+  // rooms don't overlap the originals.
+  let rootW = width - 2;
+  let rootH = height - 2;
+  if (config.symmetry === "Horizontal" || config.symmetry === "Four-Way") {
+    rootW = Math.floor((width - 2) / 2);
+  }
+  if (config.symmetry === "Vertical" || config.symmetry === "Four-Way" || config.symmetry === "Radial") {
+    rootH = Math.floor((height - 2) / 2);
+  }
 
   const root: BSPNode = {
     x: 1,
     y: 1,
-    width: width - 2,
-    height: height - 2,
+    width: rootW,
+    height: rootH,
     left: null,
     right: null,
     room: null,
@@ -178,27 +234,36 @@ export function generateBSP(
 
   const leaves = collectLeaves(root);
   const rooms: Room[] = [];
+  const eccentricity = config.room_eccentricity ?? 0.5;
+
+  // Eccentricity range is computed from the GLOBAL sizeRange, not per-leaf.
+  // eccentricity=0  → all rooms target the midpoint (uniform size)
+  // eccentricity=1  → range extends from ABS_MIN up to sizeRange.max (dramatic variation)
+  const ABS_MIN = 3;
+  const globalMid = Math.floor((sizeRange.min + sizeRange.max) / 2);
+  const eccentricLo = Math.max(ABS_MIN, Math.round(globalMid - (globalMid - ABS_MIN) * eccentricity));
+  const eccentricHi = Math.round(globalMid + (sizeRange.max - globalMid) * eccentricity);
 
   for (let i = 0; i < leaves.length && i < targetCount; i++) {
     const leaf = leaves[i]!;
 
-    const marginX = Math.max(1, Math.floor(leaf.width * densityMargin));
-    const marginY = Math.max(1, Math.floor(leaf.height * densityMargin));
+    // Room size: sampled from the eccentricity range, then clamped to what
+    // physically fits in the leaf. Density margin does NOT restrict size here —
+    // it only controls how the room is positioned within the leaf.
+    const maxFitW = leaf.width - 2;
+    const maxFitH = leaf.height - 2;
+    if (maxFitW < 2 || maxFitH < 2) continue;
 
-    const maxRoomW = Math.min(sizeRange.max, leaf.width - marginX * 2);
-    const maxRoomH = Math.min(sizeRange.max, leaf.height - marginY * 2);
-    const minRoomW = Math.min(sizeRange.min, maxRoomW);
-    const minRoomH = Math.min(sizeRange.min, maxRoomH);
+    const roomW = Math.max(2, Math.min(rng.nextInt(eccentricLo, Math.max(eccentricLo, eccentricHi)), maxFitW));
+    const roomH = Math.max(2, Math.min(rng.nextInt(eccentricLo, Math.max(eccentricLo, eccentricHi)), maxFitH));
 
-    if (minRoomW < 2 || minRoomH < 2) continue;
-
-    const roomW = rng.nextInt(minRoomW, maxRoomW);
-    const roomH = rng.nextInt(minRoomH, maxRoomH);
-
-    const maxX = leaf.x + leaf.width - roomW - marginX;
-    const maxY = leaf.y + leaf.height - roomH - marginY;
-    const roomX = rng.nextInt(leaf.x + marginX, Math.max(leaf.x + marginX, maxX));
-    const roomY = rng.nextInt(leaf.y + marginY, Math.max(leaf.y + marginY, maxY));
+    // Density margin is positioning-only: how far from the leaf edge the room
+    // can sit. If the room is large relative to the leaf, the margin shrinks
+    // (room size wins, density only determines leftover spacing).
+    const desiredMarginX = Math.max(1, Math.floor(leaf.width * densityMargin));
+    const desiredMarginY = Math.max(1, Math.floor(leaf.height * densityMargin));
+    const marginX = Math.min(desiredMarginX, Math.floor((leaf.width - roomW) / 2));
+    const marginY = Math.min(desiredMarginY, Math.floor((leaf.height - roomH) / 2));
 
     const shapes = config.room_shapes ?? ["Rectangular"];
     const eligible = shapes.filter((s) => {
@@ -208,14 +273,34 @@ export function generateBSP(
     const pool = eligible.length > 0 ? eligible : ["Rectangular"];
     const shape = pool[rng.nextInt(0, pool.length - 1)] ?? "Rectangular";
 
+    // Cross and Square rooms must have equal width/height so their geometry
+    // (cross arms, carved square) matches their stored bounding box exactly.
+    // Re-center within the originally allocated space so placement stays valid.
+    let finalW = roomW, finalH = roomH;
+    if (shape === "Cross" || shape === "Square") {
+      const s = Math.min(roomW, roomH);
+      finalW = s;
+      finalH = s;
+    }
+
+    // Placement uses the original bounding box (roomW × roomH) so the
+    // squarification offset never pushes the room outside the leaf.
+    const squarified = shape === "Cross" || shape === "Square";
+    const maxX = leaf.x + leaf.width - roomW - marginX;
+    const maxY = leaf.y + leaf.height - roomH - marginY;
+    const baseX = rng.nextInt(leaf.x + marginX, Math.max(leaf.x + marginX, maxX));
+    const baseY = rng.nextInt(leaf.y + marginY, Math.max(leaf.y + marginY, maxY));
+    const finalX = squarified ? Math.floor(baseX + (roomW - finalW) / 2) : baseX;
+    const finalY = squarified ? Math.floor(baseY + (roomH - finalH) / 2) : baseY;
+
     const room: Room = {
       id: rooms.length,
-      x: roomX,
-      y: roomY,
-      width: roomW,
-      height: roomH,
-      centerX: Math.floor(roomX + roomW / 2),
-      centerY: Math.floor(roomY + roomH / 2),
+      x: finalX,
+      y: finalY,
+      width: finalW,
+      height: finalH,
+      centerX: Math.floor(finalX + finalW / 2),
+      centerY: Math.floor(finalY + finalH / 2),
       shape,
       connections: [],
       features: [],
@@ -223,6 +308,10 @@ export function generateBSP(
 
     leaf.room = room;
     rooms.push(room);
+  }
+
+  if (config.symmetry !== "None") {
+    applySymmetry(rooms, config.symmetry, width, height);
   }
 
   return rooms;

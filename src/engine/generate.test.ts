@@ -369,7 +369,7 @@ function corridorCellsInRooms(dungeon: ReturnType<typeof generateDungeon>): Corr
     for (const pos of corridor.path) {
       const cell = dungeon.grid[pos.y]?.[pos.x];
       if (cell === undefined) continue;
-      // The corridor carved into a room that isn't one of its endpoints
+      // The corridor carved into a room that isn't one of its endpoints.
       if (
         cell.type === CellType.Floor &&
         cell.roomId !== null &&
@@ -847,6 +847,7 @@ describe("stress — constructed layout (50 configs)", () => {
       corridors:        CORRIDORS[i % CORRIDORS.length],
       door_types:       [DOORS[i % DOORS.length]!],
       dead_ends:        DEAD_ENDS[Math.floor(i / CORRIDORS.length) % DEAD_ENDS.length],
+      room_density:     "Exact",
       room_count:       ROOM_COUNTS[i % ROOM_COUNTS.length],
       room_shapes:      [...SHAPE_SETS[i % SHAPE_SETS.length]],
       ...GRID_SIZES[i % GRID_SIZES.length],
@@ -866,6 +867,7 @@ describe("stress — organic layout (50 configs)", () => {
       seed:         STRESS_SEEDS_ORGANIC[i],
       corridors:    CORRIDORS[i % CORRIDORS.length],
       dead_ends:    DEAD_ENDS[Math.floor(i / CORRIDORS.length) % DEAD_ENDS.length],
+      room_density: "Exact",
       room_count:   ROOM_COUNTS[i % ROOM_COUNTS.length],
       room_shapes:  [...SHAPE_SETS[i % SHAPE_SETS.length]],
       ...GRID_SIZES[i % GRID_SIZES.length],
@@ -901,7 +903,7 @@ describe("Labyrinth — 1-cell gap from third-party rooms (normal configs)", () 
     test(
       `seed=${seed} rooms=${room_count} grid=${gridSize.grid_width}x${gridSize.grid_height}`,
       () => {
-        const dungeon = generateDungeon(cfg({ corridors: "Labyrinth", seed, room_count, ...gridSize }));
+        const dungeon = generateDungeon(cfg({ corridors: "Labyrinth", room_density: "Exact", seed, room_count, ...gridSize }));
         const violations = corridorCellsAdjacentToRooms(dungeon);
         if (violations.length > 0) {
           const s = violations.slice(0, 3)
@@ -931,6 +933,7 @@ describe("dead ends — generation counts", () => {
     room_size: "Large",
     grid_width: 80,
     grid_height: 80,
+    room_density: "Exact",
     room_count: 10,
     corridors: "Straight",
   });
@@ -946,16 +949,16 @@ describe("dead ends — generation counts", () => {
   });
 
   for (const seed of FEW_SEEDS) {
-    test(`dead_ends=Few generates ≥1 dead end (seed=${seed})`, () => {
+    test(`dead_ends=Few generates ≥2 dead ends (seed=${seed})`, () => {
       const count = countDeadEndCorridors(generateDungeon({ ...BASE, dead_ends: "Few", seed }));
-      expect(count).toBeGreaterThanOrEqual(1);
+      expect(count).toBeGreaterThanOrEqual(2);
     });
   }
 
   for (const seed of MANY_SEEDS) {
-    test(`dead_ends=Many generates ≥2 dead ends (seed=${seed})`, () => {
+    test(`dead_ends=Many generates ≥5 dead ends (seed=${seed})`, () => {
       const count = countDeadEndCorridors(generateDungeon({ ...BASE, dead_ends: "Many", seed }));
-      expect(count).toBeGreaterThanOrEqual(2);
+      expect(count).toBeGreaterThanOrEqual(5);
     });
   }
 
@@ -971,6 +974,7 @@ describe("dead ends — invariants", () => {
     room_size: "Large",
     grid_width: 80,
     grid_height: 80,
+    room_density: "Exact",
     room_count: 10,
     corridors: "Straight",
     dead_ends: "Many",

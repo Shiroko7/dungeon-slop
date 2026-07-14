@@ -16,6 +16,8 @@ export interface ThemePalette {
   roomHighlight: string;
   roomHover: string;
   text: string;
+  ink: string;
+  parchment: string;
 }
 
 const themeMap: Record<string, ThemePalette> = {

@@ -1,10 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-
-export type EditTool =
-  | "select" | "room" | "paint" | "erase"
-  | "door" | "locked_door" | "secret_door" | "portcullis" | "archway" | "trapped_door"
-  | "trap" | "treasure" | "stairs_up" | "stairs_down";
+import { FeatureType } from "../engine/types.ts";
+import type { EditTool } from "../engine/edit-engine.ts";
 
 interface UIState {
   // Pan/zoom
@@ -28,11 +25,16 @@ interface UIState {
   // Prompt
   promptText: string;
 
+  // Legend visibility
+  hiddenFeatureTypes: FeatureType[];
+
   // Edit mode
   editMode: boolean;
   activeTool: EditTool;
-  paintRoomId: number | null;   // explicitly locked room (null = auto-infer)
-  paintRoomLocked: boolean;     // whether paintRoomId was manually locked
+  editLockedRoomId: number | null;
+
+  // Debug / inspect
+  roomIdInspectMode: boolean;
 
   // Actions
   setPan: (x: number, y: number) => void;
@@ -48,10 +50,11 @@ interface UIState {
   toggleExport: () => void;
   setIsExportOpen: (v: boolean) => void;
   resetView: () => void;
-  setEditMode: (v: boolean) => void;
+  toggleFeatureType: (type: FeatureType) => void;
+  toggleEditMode: () => void;
   setActiveTool: (tool: EditTool) => void;
-  lockPaintRoom: (id: number) => void;
-  unlockPaintRoom: () => void;
+  setEditLockedRoomId: (id: number | null) => void;
+  toggleRoomIdInspectMode: () => void;
 }
 
 const transientDefaults = {
@@ -63,6 +66,10 @@ const transientDefaults = {
   hoveredCorridorId: null as number | null,
   isSettingsOpen: false,
   isExportOpen: false,
+  editMode: false,
+  activeTool: "floor" as EditTool,
+  editLockedRoomId: null as number | null,
+  roomIdInspectMode: false,
 };
 
 export const useUIStore = create<UIState>()(
@@ -72,10 +79,7 @@ export const useUIStore = create<UIState>()(
       isSidebarOpen: true,
       darkMode: false,
       promptText: "",
-      editMode: false,
-      activeTool: "select" as EditTool,
-      paintRoomId: null as number | null,
-      paintRoomLocked: false,
+      hiddenFeatureTypes: [] as FeatureType[],
 
       setPan: (x, y) => set({ panX: x, panY: y }),
       setZoom: (zoom) => set({ zoom }),
@@ -90,10 +94,15 @@ export const useUIStore = create<UIState>()(
       toggleExport: () => set((state) => ({ isExportOpen: !state.isExportOpen })),
       setIsExportOpen: (v) => set({ isExportOpen: v }),
       resetView: () => set({ ...transientDefaults }),
-      setEditMode: (v) => set({ editMode: v, activeTool: "select", paintRoomId: null, paintRoomLocked: false }),
+      toggleFeatureType: (type) => set((state) => ({
+        hiddenFeatureTypes: state.hiddenFeatureTypes.includes(type)
+          ? state.hiddenFeatureTypes.filter((t) => t !== type)
+          : [...state.hiddenFeatureTypes, type],
+      })),
+      toggleEditMode: () => set((state) => ({ editMode: !state.editMode, editLockedRoomId: null })),
       setActiveTool: (tool) => set({ activeTool: tool }),
-      lockPaintRoom: (id) => set({ paintRoomId: id, paintRoomLocked: true }),
-      unlockPaintRoom: () => set({ paintRoomId: null, paintRoomLocked: false }),
+      setEditLockedRoomId: (id) => set({ editLockedRoomId: id }),
+      toggleRoomIdInspectMode: () => set((state) => ({ roomIdInspectMode: !state.roomIdInspectMode })),
     }),
     {
       name: "dungeon-slop-ui",

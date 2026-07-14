@@ -108,8 +108,11 @@ export function SvgOverlay() {
   const panX = useUIStore((s) => s.panX);
   const panY = useUIStore((s) => s.panY);
   const zoom = useUIStore((s) => s.zoom);
+  const hiddenFeatureTypes = useUIStore((s) => s.hiddenFeatureTypes);
 
   if (!dungeon) return null;
+
+  const hidden = new Set(hiddenFeatureTypes);
 
   return (
     <svg
@@ -128,7 +131,7 @@ export function SvgOverlay() {
           <CorridorLabel key={corridor.id} corridor={corridor} grid={dungeon.grid} cellSize={CELL_SIZE} />
         ))}
         {dungeon.features
-          .filter((f) => !DOOR_FEATURE_TYPES.has(f.type))
+          .filter((f) => !DOOR_FEATURE_TYPES.has(f.type) && !hidden.has(f.type))
           .map((feature) => (
             <FeatureIcon key={feature.id} feature={feature} cellSize={CELL_SIZE} />
           ))}

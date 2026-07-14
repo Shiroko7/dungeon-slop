@@ -1,10 +1,14 @@
 import { jsPDF } from "jspdf";
 import type { Dungeon } from "../engine/types.ts";
+import { FeatureType } from "../engine/types.ts";
 import { renderDungeon } from "../renderer/canvas-renderer.ts";
 import { getTheme } from "../renderer/themes/theme-engine.ts";
+import { useUIStore } from "../store/ui-store.ts";
 
 export function exportPDF(dungeon: Dungeon): void {
   const cellSize = 20;
+
+  const hidden = new Set(useUIStore.getState().hiddenFeatureTypes) as ReadonlySet<FeatureType>;
 
   // Render map to offscreen canvas
   const canvas = document.createElement("canvas");
@@ -17,6 +21,7 @@ export function exportPDF(dungeon: Dungeon): void {
     theme: getTheme(dungeon.config.motif),
     selectedRoomId: null,
     hoveredRoomId: null,
+    hiddenFeatureTypes: hidden,
   });
 
   const imgData = canvas.toDataURL("image/png");

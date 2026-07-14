@@ -4,22 +4,30 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run --hot src/index.ts",
-    "start": "bun run src/index.ts",
+    "dev": "concurrently \"bun run api\" \"bun x --bun vite\"",
+    "api": "bun run --hot src/server.ts",
+    "start": "bun run src/server.ts",
+    "build": "bun x --bun vite build",
+    "preview": "bun x --bun vite preview",
     "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19",
-    "@types/react-dom": "^19"
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5.1.4",
+    "concurrently": "^9.2.1",
+    "vite": "^7.3.1"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "jspdf": "^2",
+    "polybooljs": "^1.2.2",
     "react": "^19",
     "react-dom": "^19",
+    "roughjs": "^4.6.6",
     "zod": "^3",
     "zustand": "^5"
   }

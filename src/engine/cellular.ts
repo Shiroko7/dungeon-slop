@@ -204,7 +204,7 @@ export function generateCellular(
   config: DungeonConfig,
   rng: SeededRandom,
 ): { rooms: Room[]; caveGrid: Cell[][] } {
-  const targetChambers = config.room_count;
+  const targetChambers = config.room_count ?? 10;
   let grid = createGrid(width, height);
 
   initializeCave(grid, width, height, rng);

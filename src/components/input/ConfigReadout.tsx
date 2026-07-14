@@ -1,12 +1,17 @@
+import { useState } from "react";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
 import type { DungeonConfig } from "../../ai/schema.ts";
 
 const CONFIG_LABELS: Record<keyof DungeonConfig, string> = {
   layout_style: "Layout Style",
   motif: "Motif",
-  room_layout: "Room Layout",
+  room_density: "Room Count",
   room_size: "Room Size",
-  room_count: "Room Count",
+  room_count: "Room Count (Exact)",
+  room_eccentricity: "Room Eccentricity",
+  symmetry: "Symmetry",
+  entry_points: "Entry Points",
+  entry_point_count: "Entry Count",
   corridors: "Corridors",
   corridor_complexity: "Corridor Complexity",
   dead_ends: "Dead Ends",
@@ -25,17 +30,22 @@ const CONFIG_LABELS: Record<keyof DungeonConfig, string> = {
 type FieldMeta =
   | { kind: "enum"; options: readonly string[] }
   | { kind: "number"; min: number; max: number; step: number }
+  | { kind: "slider"; min: number; max: number; step: number }
   | { kind: "text" }
   | { kind: "multi"; options: readonly string[] };
 
 const FIELD_META: Record<keyof DungeonConfig, FieldMeta> = {
   layout_style: { kind: "enum", options: ["constructed", "organic"] },
   motif: { kind: "enum", options: ["Default", "Infernal", "Aquatic", "Natural", "Arcane", "Undead", "Mechanical", "Frozen"] },
-  room_layout: { kind: "enum", options: ["Sparse", "Moderate", "Dense"] },
+  room_density: { kind: "enum", options: ["Sparse", "Moderate", "Dense", "Exact"] },
   room_size: { kind: "enum", options: ["Tiny", "Small", "Medium", "Large", "Huge"] },
-  room_count: { kind: "number", min: 3, max: 50, step: 1 },
+  room_count: { kind: "number", min: 1, max: 100, step: 1 },
+  room_eccentricity: { kind: "slider", min: 0, max: 1, step: 0.05 },
+  symmetry: { kind: "enum", options: ["None", "Horizontal", "Vertical", "Radial", "Four-Way"] },
+  entry_points: { kind: "enum", options: ["None", "Few", "Many", "Exact"] },
+  entry_point_count: { kind: "number", min: 1, max: 8, step: 1 },
   corridors: { kind: "enum", options: ["Straight", "Winding", "Labyrinth"] },
-  corridor_complexity: { kind: "number", min: 0, max: 1, step: 0.05 },
+  corridor_complexity: { kind: "slider", min: 0, max: 1, step: 0.05 },
   dead_ends: { kind: "enum", options: ["None", "Few", "Many"] },
   door_types: { kind: "multi", options: ["Open", "Archway", "Portcullis", "Standard", "Locked", "Secure", "Trapped", "Secret"] },
   trap_density: { kind: "enum", options: ["None", "Low", "Medium", "High"] },
@@ -48,6 +58,51 @@ const FIELD_META: Record<keyof DungeonConfig, FieldMeta> = {
   theme_description: { kind: "text" },
   seed: { kind: "number", min: 0, max: 2147483647, step: 1 },
 };
+
+interface SliderFieldProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (n: number) => void;
+}
+
+function SliderField({ label, value, min, max, step, onChange }: SliderFieldProps) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const displayValue = draft ?? String(Math.round(value * 1000) / 1000);
+
+  const commit = (raw: string) => {
+    const n = parseFloat(raw);
+    if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n)));
+    setDraft(null);
+  };
+
+  return (
+    <div className="config-field">
+      <span className="config-field-key">{label}</span>
+      <div className="config-field-slider-group">
+        <input
+          type="range"
+          className="config-field-slider"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => { setDraft(null); onChange(parseFloat(e.target.value)); }}
+        />
+        <input
+          type="text"
+          className="config-field-number config-field-slider-number"
+          value={displayValue}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        />
+      </div>
+    </div>
+  );
+}
 
 interface ConfigFieldProps {
   fieldKey: keyof DungeonConfig;
@@ -74,6 +129,19 @@ function ConfigField({ fieldKey, label, config, onChange }: ConfigFieldProps) {
           ))}
         </select>
       </div>
+    );
+  }
+
+  if (meta.kind === "slider") {
+    return (
+      <SliderField
+        label={label}
+        value={(value as number) ?? 0}
+        min={meta.min}
+        max={meta.max}
+        step={meta.step}
+        onChange={(n) => onChange(fieldKey, n as DungeonConfig[keyof DungeonConfig])}
+      />
     );
   }
 
@@ -171,15 +239,21 @@ export function ConfigReadout() {
 
   return (
     <div className="config-readout">
-      {(Object.keys(CONFIG_LABELS) as Array<keyof DungeonConfig>).map((key) => (
-        <ConfigField
-          key={key}
-          fieldKey={key}
-          label={CONFIG_LABELS[key] ?? key}
-          config={config}
-          onChange={handleChange}
-        />
-      ))}
+      {(Object.keys(CONFIG_LABELS) as Array<keyof DungeonConfig>)
+        .filter((key) => {
+          if (key === "room_count" && config.room_density !== "Exact") return false;
+          if (key === "entry_point_count" && config.entry_points !== "Exact") return false;
+          return true;
+        })
+        .map((key) => (
+          <ConfigField
+            key={key}
+            fieldKey={key}
+            label={CONFIG_LABELS[key] ?? key}
+            config={config}
+            onChange={handleChange}
+          />
+        ))}
     </div>
   );
 }

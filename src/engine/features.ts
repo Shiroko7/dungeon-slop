@@ -46,8 +46,8 @@ function computeRoomSills(grid: Cell[][], room: Room): Sill[] {
 
       const cell = getCell(grid, x, y);
       if (cell === undefined) continue;
-      // Sill must be wall or empty (not floor, not corridor yet — we compute before corridors)
-      if (cell.type !== CellType.Wall && cell.type !== CellType.Empty) continue;
+      // Sill must not be room floor; Corridor cells (the carved entry points) are valid sills
+      if (cell.type === CellType.Floor) continue;
 
       // Must be cardinally adjacent to a room floor cell
       const neighbors = getNeighbors(grid, x, y);
@@ -105,18 +105,17 @@ function placeDoors(
     const cell = getCell(grid, sill.x, sill.y);
     if (cell === undefined) continue;
 
-    // The sill cell itself must now be a corridor (corridors were carved through walls)
-    // OR the sill cell is adjacent to a corridor cell
+    // The sill cell itself must be a corridor (carved through the room wall)
     const isCorridor = cell.type === CellType.Corridor;
     const neighbors = getNeighbors(grid, sill.x, sill.y);
-    const adjacentCorridor = neighbors.some((n) => n.cell.type === CellType.Corridor);
     const adjacentRoom = neighbors.some(
       (n) => n.cell.type === CellType.Floor && n.cell.roomId !== null,
     );
+    // Mirror the invalidDoors invariant exactly: door needs a neighbor with corridorId set
+    const hasCorridorNeighbor = neighbors.some((n) => n.cell.corridorId !== null);
 
-    // The sill must bridge room and corridor: adjacent to both
-    if (isCorridor && adjacentRoom) {
-      // This corridor cell is the doorway
+    // Place door at the corridor entry cell that bridges room and corridor path
+    if (isCorridor && adjacentRoom && hasCorridorNeighbor) {
       placed.add(key);
 
       const doorType = resolveDoorType(config.door_types, rng);
@@ -131,25 +130,6 @@ function placeDoors(
       features.push(feature);
       cell.featureId = feature.id;
       cell.type = CellType.Door;
-    } else if (cell.type === CellType.Wall && adjacentCorridor && adjacentRoom) {
-      // Wall cell between room and corridor — this is also a valid door position
-      placed.add(key);
-
-      const doorType = resolveDoorType(config.door_types, rng);
-      if (doorType === null) continue; // "Open" — leave as plain wall/corridor
-
-      const feature: Feature = {
-        id: featureId.value++,
-        type: doorType,
-        x: sill.x,
-        y: sill.y,
-      };
-      features.push(feature);
-      cell.featureId = feature.id;
-      cell.type = CellType.Door;
-      // Inherit corridorId from the adjacent corridor — door sits on the corridor side
-      const corridorNeighbor = neighbors.find((n) => n.cell.type === CellType.Corridor);
-      if (corridorNeighbor) cell.corridorId = corridorNeighbor.cell.corridorId;
     }
   }
 
@@ -627,7 +607,7 @@ export function generateDeadEnds(
   const manyMax = Math.max(fewMax + 1, Math.floor(spaciousness / 2));
   const targetCount =
     config.dead_ends === "Few"
-      ? rng.nextInt(1, fewMax)
+      ? rng.nextInt(2, fewMax)
       : rng.nextInt(fewMax, manyMax);
 
   // Attempt budget: more targets on larger grids need more tries since dense spots

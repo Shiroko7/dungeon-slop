@@ -1,4 +1,5 @@
 import { useDungeonStore } from "../../store/dungeon-store.ts";
+import { useUIStore } from "../../store/ui-store.ts";
 import type { ReactNode } from "react";
 import { FeatureType } from "../../engine/types.ts";
 
@@ -89,6 +90,8 @@ const LEGEND_ENTRIES: LegendEntry[] = [
 
 export function MapLegend() {
   const dungeon = useDungeonStore((s) => s.dungeon);
+  const hiddenFeatureTypes = useUIStore((s) => s.hiddenFeatureTypes);
+  const toggleFeatureType = useUIStore((s) => s.toggleFeatureType);
 
   if (!dungeon) return null;
 
@@ -101,12 +104,20 @@ export function MapLegend() {
     <div className="map-legend">
       <div className="map-legend-title">Legend</div>
       <div className="map-legend-items">
-        {visibleEntries.map((entry) => (
-          <div key={entry.type} className="map-legend-item">
-            <span className="map-legend-icon">{entry.icon}</span>
-            <span className="map-legend-label">{entry.label}</span>
-          </div>
-        ))}
+        {visibleEntries.map((entry) => {
+          const isHidden = hiddenFeatureTypes.includes(entry.type);
+          return (
+            <button
+              key={entry.type}
+              className={`map-legend-item${isHidden ? " map-legend-item--hidden" : ""}`}
+              onClick={() => toggleFeatureType(entry.type)}
+              title={isHidden ? `Show ${entry.label}` : `Hide ${entry.label}`}
+            >
+              <span className="map-legend-icon">{entry.icon}</span>
+              <span className="map-legend-label">{entry.label}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

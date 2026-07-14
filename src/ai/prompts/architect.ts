@@ -17,17 +17,35 @@ The config object must contain ALL of the following fields with values from thei
 - motif: "Default" | "Infernal" | "Aquatic" | "Natural" | "Arcane" | "Undead" | "Mechanical" | "Frozen"
   The thematic flavor of the dungeon.
 
-- room_layout: "Sparse" | "Moderate" | "Dense"
-  How tightly packed the rooms are.
+- room_density: "Sparse" | "Moderate" | "Dense" | "Exact"
+  Controls room count AND packing. "Sparse" = few rooms widely spaced, "Moderate" = balanced,
+  "Dense" = many rooms tightly packed. "Exact" = uses room_count field for precise control.
+
+- room_count: integer, 1 to 100 (only include when room_density is "Exact")
+  Exact number of rooms. Omit when room_density is Sparse/Moderate/Dense.
 
 - room_size: "Tiny" | "Small" | "Medium" | "Large" | "Huge"
   The general size of rooms.
 
-- room_count: integer, 3 to 50
-  Total number of rooms.
+- room_eccentricity: number, 0.0 to 1.0
+  How much room sizes vary from each other. 0 = all rooms roughly the same size,
+  1 = extreme size variance (tiny rooms next to enormous ones).
+
+- symmetry: "None" | "Horizontal" | "Vertical" | "Radial" | "Four-Way"
+  Layout symmetry for constructed dungeons (has no effect on organic). "None" = pure random,
+  "Horizontal" = left/right mirror, "Vertical" = top/bottom mirror,
+  "Radial" = 180° rotational symmetry, "Four-Way" = mirrored on all four quadrants.
+  Use for temples, castles, or formal architecture.
+
+- entry_points: "None" | "Few" | "Many" | "Exact"
+  Entry corridors leading in from the map edge. Each entry is a corridor that starts at the
+  grid border and connects to a room. "Exact" uses entry_point_count.
+
+- entry_point_count: integer, 1 to 8 (only include when entry_points is "Exact")
 
 - corridors: "Straight" | "Winding" | "Labyrinth"
   The style of corridors connecting rooms.
+  "Straight" = mostly direct L-shaped paths. "Winding" = curving paths with 50% directional drift. "Labyrinth" = A*-routed paths, maximally avoids open space.
 
 - corridor_complexity: number, 0.0 to 1.0
   How complex/branching the corridor network is.
@@ -80,15 +98,15 @@ Here are examples of how to translate descriptions:
 
 Example 1:
 User: "A claustrophobic prison for fire giants"
-Response: { "config": { "layout_style": "constructed", "motif": "Infernal", "room_layout": "Dense", "room_size": "Small", "room_count": 20, "corridors": "Straight", "corridor_complexity": 0.2, "dead_ends": "Few", "door_types": ["Portcullis", "Locked"], "trap_density": "Medium", "treasure_density": "Low", "stairs": "Few", "grid_type": "Square", "grid_width": 80, "grid_height": 80, "room_shapes": ["Rectangular", "Square"], "theme_description": "A sweltering underground prison hewn from volcanic basalt, designed to contain fire giants. Narrow cells line oppressive corridors thick with heat haze." } }
+Response: { "config": { "layout_style": "constructed", "motif": "Infernal", "room_density": "Dense", "room_size": "Small", "room_eccentricity": 0.3, "symmetry": "None", "entry_points": "Few", "corridors": "Straight", "corridor_complexity": 0.2, "dead_ends": "Few", "door_types": ["Portcullis", "Locked"], "trap_density": "Medium", "treasure_density": "Low", "stairs": "Few", "grid_type": "Square", "grid_width": 80, "grid_height": 80, "room_shapes": ["Rectangular", "Square"], "theme_description": "A sweltering underground prison hewn from volcanic basalt, designed to contain fire giants. Narrow cells line oppressive corridors thick with heat haze." } }
 
 Example 2:
 User: "An underwater temple dedicated to a forgotten sea god"
-Response: { "config": { "layout_style": "organic", "motif": "Aquatic", "room_layout": "Moderate", "room_size": "Large", "room_count": 12, "corridors": "Winding", "corridor_complexity": 0.5, "dead_ends": "Few", "door_types": ["Open", "Archway"], "trap_density": "Low", "treasure_density": "Medium", "stairs": "Many", "grid_type": "Square", "grid_width": 100, "grid_height": 100, "room_shapes": ["Circular", "Cave", "Hexagonal"], "theme_description": "A submerged temple of coral and ancient stone, its chambers flooded with brine. Bioluminescent algae illuminate altars to a deity whose name the sea has swallowed." } }
+Response: { "config": { "layout_style": "organic", "motif": "Aquatic", "room_density": "Moderate", "room_size": "Large", "room_eccentricity": 0.6, "symmetry": "Radial", "entry_points": "None", "corridors": "Winding", "corridor_complexity": 0.5, "dead_ends": "Few", "door_types": ["Open", "Archway"], "trap_density": "Low", "treasure_density": "Medium", "stairs": "Many", "grid_type": "Square", "grid_width": 100, "grid_height": 100, "room_shapes": ["Circular", "Cave", "Hexagonal"], "theme_description": "A submerged temple of coral and ancient stone, its chambers flooded with brine. Bioluminescent algae illuminate altars to a deity whose name the sea has swallowed." } }
 
 Example 3:
 User: "A wizard's tower that goes deep underground"
-Response: { "config": { "layout_style": "constructed", "motif": "Arcane", "room_layout": "Sparse", "room_size": "Medium", "room_count": 15, "corridors": "Winding", "corridor_complexity": 0.6, "dead_ends": "Many", "door_types": ["Secret", "Trapped", "Standard"], "trap_density": "High", "treasure_density": "High", "stairs": "Many", "grid_type": "Square", "grid_width": 100, "grid_height": 100, "room_shapes": ["Circular", "Hexagonal", "Diamond", "Cross"], "theme_description": "The sub-basement levels of a paranoid archmage's tower, riddled with misdirection, arcane wards, and secret vaults containing decades of hoarded magical research." } }
+Response: { "config": { "layout_style": "constructed", "motif": "Arcane", "room_density": "Sparse", "room_size": "Medium", "room_eccentricity": 0.8, "symmetry": "None", "entry_points": "None", "corridors": "Winding", "corridor_complexity": 0.6, "dead_ends": "Many", "door_types": ["Secret", "Trapped", "Standard"], "trap_density": "High", "treasure_density": "High", "stairs": "Many", "grid_type": "Square", "grid_width": 100, "grid_height": 100, "room_shapes": ["Circular", "Hexagonal", "Diamond", "Cross"], "theme_description": "The sub-basement levels of a paranoid archmage's tower, riddled with misdirection, arcane wards, and secret vaults containing decades of hoarded magical research." } }
 
 Remember: respond with pure JSON only. No markdown, no commentary.`;
 

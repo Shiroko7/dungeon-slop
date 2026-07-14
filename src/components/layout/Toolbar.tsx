@@ -27,8 +27,7 @@ export function Toolbar() {
   const toggleSettings = useUIStore((s) => s.toggleSettings);
   const toggleExport = useUIStore((s) => s.toggleExport);
   const editMode = useUIStore((s) => s.editMode);
-  const setEditMode = useUIStore((s) => s.setEditMode);
-
+  const toggleEditMode = useUIStore((s) => s.toggleEditMode);
   const [seedInput, setSeedInput] = useState("");
 
   const handleGenerateDungeon = useCallback(() => {
@@ -109,6 +108,20 @@ export function Toolbar() {
 
       <div className="toolbar-center">
         <Button
+          variant="primary"
+          size="sm"
+          onClick={toggleEditMode}
+          disabled={!dungeon}
+          title={editMode ? "Exit edit mode" : "Enter edit mode"}
+          aria-label={editMode ? "Exit edit mode" : "Enter edit mode"}
+          aria-pressed={editMode}
+        >
+          {editMode ? "Done" : "Edit"}
+        </Button>
+
+        <span className="toolbar-divider" />
+
+        <Button
           variant="icon"
           size="sm"
           onClick={undoEdit}
@@ -128,7 +141,9 @@ export function Toolbar() {
         >
           &#8631;
         </Button>
+
         <span className="toolbar-divider" />
+
         <Button variant="icon" size="sm" onClick={handleZoomOut} aria-label="Zoom out">
           &minus;
         </Button>
@@ -142,16 +157,6 @@ export function Toolbar() {
       </div>
 
       <div className="toolbar-right">
-        <Button
-          variant={editMode ? "primary" : "icon"}
-          size="sm"
-          onClick={() => setEditMode(!editMode)}
-          disabled={!dungeon}
-          title="Edit map"
-          aria-label="Toggle edit mode"
-        >
-          &#9998;
-        </Button>
         <Button
           variant="icon"
           size="sm"
