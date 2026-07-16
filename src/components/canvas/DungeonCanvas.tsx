@@ -7,16 +7,30 @@ import { CorridorTooltip } from "./CorridorTooltip.tsx";
 import { EditToolPalette } from "./EditToolPalette.tsx";
 import { EditEngine } from "../../engine/edit-engine.ts";
 import type { EditTool } from "../../engine/edit-engine.ts";
-import { CellType, FeatureType } from "../../engine/types.ts";
 import type { Dungeon, Room } from "../../engine/types.ts";
 import { getTheme, type ThemePalette } from "../../renderer/themes/theme-engine.ts";
 import {
-  renderFloorPlan,
+  renderStaticLayers,
   buildDungeonBuffer,
 } from "../../renderer/canvas-renderer.ts";
 import { getRoomGeometry, createRoomPath } from "../../renderer/room-shapes.ts";
 
 const CELL_SIZE = 16;
+
+// ─── Buffer resolution ────────────────────────────────────────────────────────
+// The static buffer renders at dpr × zoom-bucket resolution so it stays crisp
+// when zoomed in, quantized to 3 buckets to avoid rebuilding on every wheel
+// tick, and capped so the buffer never exceeds ~4096px on a side.
+const BUFFER_PIXEL_CAP = 4096;
+
+function zoomBucketFor(zoom: number): number {
+  return zoom <= 1 ? 1 : zoom <= 2 ? 2 : 3;
+}
+
+function bufferScaleFor(dungeon: Dungeon, dpr: number, zoom: number): number {
+  const worldMax = Math.max(dungeon.width, dungeon.height) * CELL_SIZE;
+  return Math.min(dpr * zoomBucketFor(zoom), BUFFER_PIXEL_CAP / worldMax);
+}
 
 // Per-tool overlay colors (stroke-in-progress and ghost-hover)
 const TOOL_STROKE_COLORS: Record<EditTool, string> = {
@@ -117,133 +131,6 @@ function getCellColors(): CellColors {
   };
 }
 
-// ─── Door cartographic symbols ────────────────────────────────────────────────
-
-const DOOR_FEATURE_SET = new Set<FeatureType>([
-  FeatureType.Door, FeatureType.LockedDoor, FeatureType.SecretDoor,
-  FeatureType.Portcullis, FeatureType.Archway, FeatureType.TrappedDoor,
-]);
-
-function getDoorOrientation(dungeon: Dungeon, x: number, y: number): "ns" | "ew" {
-  const north = dungeon.grid[y - 1]?.[x];
-  const south = dungeon.grid[y + 1]?.[x];
-  if ((north !== undefined && north.roomId !== null) ||
-      (south !== undefined && south.roomId !== null)) return "ns";
-  return "ew";
-}
-
-function drawDoorSymbol(
-  ctx: CanvasRenderingContext2D,
-  type: FeatureType,
-  px: number,
-  py: number,
-  cs: number,
-  orientation: "ns" | "ew",
-  ink: string,
-  spanCells = 1,
-): void {
-  const sw = Math.round(cs * 0.27);
-  const sh = Math.round(cs * 0.5);
-  const off = Math.round((cs - sh) / 2);
-  ctx.fillStyle = ink;
-  ctx.strokeStyle = ink;
-
-  if (orientation === "ns") {
-    const totalW = spanCells * cs;
-    ctx.fillRect(px,               py + off, sw, sh);
-    ctx.fillRect(px + totalW - sw, py + off, sw, sh);
-    const x1 = px + sw, x2 = px + totalW - sw, midY = py + cs / 2;
-    switch (type) {
-      case FeatureType.Archway: break;
-      case FeatureType.Portcullis: {
-        ctx.lineWidth = 1; ctx.beginPath();
-        const step = sh / 4;
-        for (let i = 1; i <= 3; i++) { const ly = py + off + step * i; ctx.moveTo(x1, ly); ctx.lineTo(x2, ly); }
-        ctx.stroke(); break;
-      }
-      case FeatureType.Door: ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x1, midY); ctx.lineTo(x2, midY); ctx.stroke(); break;
-      case FeatureType.LockedDoor: {
-        ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x1, midY); ctx.lineTo(x2, midY); ctx.stroke();
-        ctx.beginPath(); ctx.arc((x1 + x2) / 2, midY, Math.max(1.5, cs * 0.12), 0, Math.PI * 2); ctx.fill(); break;
-      }
-      case FeatureType.TrappedDoor: {
-        ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x1, midY); ctx.lineTo(x2, midY); ctx.stroke();
-        const xs = cs * 0.14, cx = (x1 + x2) / 2;
-        ctx.lineWidth = 1; ctx.beginPath();
-        ctx.moveTo(cx - xs, midY - xs); ctx.lineTo(cx + xs, midY + xs);
-        ctx.moveTo(cx + xs, midY - xs); ctx.lineTo(cx - xs, midY + xs);
-        ctx.stroke(); break;
-      }
-      case FeatureType.SecretDoor:
-        ctx.lineWidth = 1; ctx.setLineDash([2, 1.5]);
-        ctx.beginPath(); ctx.moveTo(x1, midY); ctx.lineTo(x2, midY); ctx.stroke();
-        ctx.setLineDash([]); break;
-    }
-  } else {
-    const totalH = spanCells * cs;
-    ctx.fillRect(px + off, py,               sh, sw);
-    ctx.fillRect(px + off, py + totalH - sw, sh, sw);
-    const y1 = py + sw, y2 = py + totalH - sw, midX = px + cs / 2;
-    switch (type) {
-      case FeatureType.Archway: break;
-      case FeatureType.Portcullis: {
-        ctx.lineWidth = 1; ctx.beginPath();
-        const step = sh / 4;
-        for (let i = 1; i <= 3; i++) { const lx = px + off + step * i; ctx.moveTo(lx, y1); ctx.lineTo(lx, y2); }
-        ctx.stroke(); break;
-      }
-      case FeatureType.Door: ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(midX, y1); ctx.lineTo(midX, y2); ctx.stroke(); break;
-      case FeatureType.LockedDoor: {
-        ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(midX, y1); ctx.lineTo(midX, y2); ctx.stroke();
-        ctx.beginPath(); ctx.arc(midX, (y1 + y2) / 2, Math.max(1.5, cs * 0.12), 0, Math.PI * 2); ctx.fill(); break;
-      }
-      case FeatureType.TrappedDoor: {
-        ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(midX, y1); ctx.lineTo(midX, y2); ctx.stroke();
-        const xs = cs * 0.14, cy = (y1 + y2) / 2;
-        ctx.lineWidth = 1; ctx.beginPath();
-        ctx.moveTo(midX - xs, cy - xs); ctx.lineTo(midX + xs, cy + xs);
-        ctx.moveTo(midX + xs, cy - xs); ctx.lineTo(midX - xs, cy + xs);
-        ctx.stroke(); break;
-      }
-      case FeatureType.SecretDoor:
-        ctx.lineWidth = 1; ctx.setLineDash([2, 1.5]);
-        ctx.beginPath(); ctx.moveTo(midX, y1); ctx.lineTo(midX, y2); ctx.stroke();
-        ctx.setLineDash([]); break;
-    }
-  }
-}
-
-function drawDoorSymbols(
-  ctx: CanvasRenderingContext2D,
-  dungeon: Dungeon,
-  inkColor: string,
-  hidden: ReadonlySet<FeatureType> = new Set(),
-): void {
-  const featureCells = new Map<number, Array<{ x: number; y: number }>>();
-  for (let y = 0; y < dungeon.height; y++) {
-    const row = dungeon.grid[y];
-    if (!row) continue;
-    for (let x = 0; x < dungeon.width; x++) {
-      const cell = row[x];
-      if (!cell || cell.featureId === null) continue;
-      if (cell.type !== CellType.Door && cell.type !== CellType.SecretDoor) continue;
-      const fid = cell.featureId;
-      if (!featureCells.has(fid)) featureCells.set(fid, []);
-      featureCells.get(fid)!.push({ x, y });
-    }
-  }
-  for (const feature of dungeon.features) {
-    if (!DOOR_FEATURE_SET.has(feature.type)) continue;
-    if (hidden.has(feature.type)) continue;
-    const cells = featureCells.get(feature.id) ?? [{ x: feature.x, y: feature.y }];
-    const sampleCell = cells[0] ?? { x: feature.x, y: feature.y };
-    const orientation = getDoorOrientation(dungeon, sampleCell.x, sampleCell.y);
-    let minX = feature.x, minY = feature.y;
-    for (const c of cells) { if (c.x < minX) minX = c.x; if (c.y < minY) minY = c.y; }
-    drawDoorSymbol(ctx, feature.type, minX * CELL_SIZE, minY * CELL_SIZE, CELL_SIZE, orientation, inkColor, cells.length);
-  }
-}
-
 function drawRoomBorders(
   ctx: CanvasRenderingContext2D,
   dungeon: Dungeon,
@@ -291,7 +178,6 @@ export function DungeonCanvas() {
   const cellColorsRef    = useRef<CellColors>(getCellColors());
   const themeRef         = useRef<ThemePalette>(getTheme("Default"));
   const rafHandle        = useRef<number>(0);
-  const hiddenSetRef     = useRef<Set<FeatureType>>(new Set());
 
   // Edit mode
   const editEngineRef       = useRef(new EditEngine());
@@ -302,24 +188,35 @@ export function DungeonCanvas() {
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
 
   // ── Store subscriptions ───────────────────────────────────────────────────
-  const dungeon           = useDungeonStore((s) => s.dungeon);
-  const hoveredRoomId     = useUIStore((s) => s.hoveredRoomId);
-  const hoveredCorridorId = useUIStore((s) => s.hoveredCorridorId);
-  const darkMode          = useUIStore((s) => s.darkMode);
-  const editMode          = useUIStore((s) => s.editMode);
+  const dungeon            = useDungeonStore((s) => s.dungeon);
+  const hoveredRoomId      = useUIStore((s) => s.hoveredRoomId);
+  const hoveredCorridorId  = useUIStore((s) => s.hoveredCorridorId);
+  const darkMode           = useUIStore((s) => s.darkMode);
+  const editMode           = useUIStore((s) => s.editMode);
+  const hiddenFeatureTypes = useUIStore((s) => s.hiddenFeatureTypes);
 
   useEffect(() => { cellColorsRef.current = getCellColors(); }, [darkMode]);
   useEffect(() => { if (dungeon) themeRef.current = getTheme(dungeon.config.motif); }, [dungeon, darkMode]);
 
-  // ── OffscreenCanvas buffer ─────────────────────────────────────────────────
+  // ── OffscreenCanvas buffer (full static layer stack) ──────────────────────
   useEffect(() => {
     if (!dungeon) { dungeonBuffer.current = null; dungeonBufferFor.current = null; return; }
     const theme = getTheme(dungeon.config.motif);
-    const scale = window.devicePixelRatio || 1;
-    dungeonBuffer.current = buildDungeonBuffer(dungeon, CELL_SIZE, theme, scale);
+    const scale = bufferScaleFor(
+      dungeon,
+      window.devicePixelRatio || 1,
+      useUIStore.getState().zoom,
+    );
+    dungeonBuffer.current = buildDungeonBuffer(dungeon, {
+      cellSize: CELL_SIZE,
+      theme,
+      showGrid: true,
+      hiddenFeatureTypes: new Set(hiddenFeatureTypes),
+      doorInk: cellColorsRef.current.doorInk,
+    }, scale);
     bufferScaleRef.current = scale;
     dungeonBufferFor.current = dungeon;
-  }, [dungeon]);
+  }, [dungeon, darkMode, hiddenFeatureTypes]);
 
   // ── Resize canvas (backing store in device px, layout stays CSS-driven) ───
   useEffect(() => {
@@ -349,12 +246,13 @@ export function DungeonCanvas() {
     return () => observer.disconnect();
   }, []);
 
-  // ── RAF rendering loop ─────────────────────────────────────────────────────
+  // ── RAF rendering loop (dirty-flag: skips rasterization when nothing changed) ─
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const engine = editEngineRef;
     const hoverCell = hoverGridCellRef;
+    let prevSig: unknown[] = [];
 
     const frame = () => {
       const ctx = canvas.getContext("2d");
@@ -363,7 +261,6 @@ export function DungeonCanvas() {
       const {
         panX, panY, zoom,
         hoveredRoomId, hoveredCorridorId, selectedRoomId,
-        hiddenFeatureTypes,
         editMode: isEditing,
         activeTool,
         roomIdInspectMode,
@@ -381,6 +278,46 @@ export function DungeonCanvas() {
       }
       const cssW = view.cssW || canvas.width / view.dpr;
       const cssH = view.cssH || canvas.height / view.dpr;
+
+      // Rebuild the buffer if its resolution target changed (dpr / zoom bucket)
+      if (d && dungeonBuffer.current) {
+        const targetScale = bufferScaleFor(d, view.dpr, zoom);
+        if (bufferScaleRef.current !== targetScale) {
+          dungeonBuffer.current = buildDungeonBuffer(d, {
+            cellSize: CELL_SIZE,
+            theme: themeRef.current,
+            showGrid: true,
+            hiddenFeatureTypes: new Set(useUIStore.getState().hiddenFeatureTypes),
+            doorInk: cellColorsRef.current.doorInk,
+          }, targetScale);
+          bufferScaleRef.current = targetScale;
+          dungeonBufferFor.current = d;
+        }
+      }
+
+      // Composite dirty signature: every input the drawing below depends on.
+      // On equality the frame is skipped entirely (no clear, no raster work).
+      const sig: unknown[] = [
+        d, dungeonBuffer.current,
+        panX, panY, zoom, view.dpr, cssW, cssH,
+        hoveredRoomId, hoveredCorridorId, selectedRoomId,
+        isEditing, activeTool, roomIdInspectMode,
+        cellColorsRef.current, themeRef.current,
+        hoverCell.current?.x, hoverCell.current?.y,
+        engine.current.version,
+      ];
+      let dirty = sig.length !== prevSig.length;
+      if (!dirty) {
+        for (let i = 0; i < sig.length; i++) {
+          if (sig[i] !== prevSig[i]) { dirty = true; break; }
+        }
+      }
+      if (!dirty) {
+        rafHandle.current = requestAnimationFrame(frame);
+        return;
+      }
+      prevSig = sig;
+
       // All drawing below happens in CSS-px coordinates on a device-px store
       ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
 
@@ -390,18 +327,8 @@ export function DungeonCanvas() {
         return;
       }
 
-      // Rebuild the buffer if DPR changed since it was built
-      if (dungeonBuffer.current && bufferScaleRef.current !== view.dpr) {
-        dungeonBuffer.current = buildDungeonBuffer(d, CELL_SIZE, themeRef.current, view.dpr);
-        bufferScaleRef.current = view.dpr;
-        dungeonBufferFor.current = d;
-      }
-
       const theme  = themeRef.current;
       const colors = cellColorsRef.current;
-      hiddenSetRef.current.clear();
-      for (const t of hiddenFeatureTypes) hiddenSetRef.current.add(t);
-      const hidden = hiddenSetRef.current;
 
       ctx.fillStyle = theme.wall;
       ctx.fillRect(0, 0, cssW, cssH);
@@ -421,10 +348,15 @@ export function DungeonCanvas() {
           0, 0, d.width * CELL_SIZE, d.height * CELL_SIZE,
         );
       } else {
-        renderFloorPlan(ctx, d, CELL_SIZE, theme, false);
+        // Effect hasn't produced a buffer yet — draw the full stack directly
+        renderStaticLayers(ctx, d, {
+          cellSize: CELL_SIZE,
+          theme,
+          showGrid: true,
+          hiddenFeatureTypes: new Set(useUIStore.getState().hiddenFeatureTypes),
+          doorInk: colors.doorInk,
+        });
       }
-
-      drawDoorSymbols(ctx, d, colors.doorInk, hidden);
 
       // RoomID inspect overlay — paint every room-owned cell with a stable
       // per-roomId color so grid ownership is visible at a glance.

@@ -4,6 +4,7 @@ import type { Dungeon, Cell } from "../engine/types.ts";
 import { CellType, FeatureType } from "../engine/types.ts";
 import type { ThemePalette } from "./themes/theme-engine.ts";
 import { getRoomGeometry, createRoomPath } from "./room-shapes.ts";
+import { drawDoorSymbols } from "./door-symbols.ts";
 
 export interface RenderOptions {
   cellSize: number;
@@ -12,6 +13,17 @@ export interface RenderOptions {
   selectedRoomId: number | null;
   hoveredRoomId: number | null;
   hiddenFeatureTypes?: ReadonlySet<FeatureType>;
+}
+
+/** Options for the static (non-interactive) layer stack. */
+export interface StaticLayerOptions {
+  cellSize: number;
+  theme: ThemePalette;
+  showGrid: boolean;
+  hiddenFeatureTypes?: ReadonlySet<FeatureType>;
+  /** Ink color for door symbols; defaults to theme.ink. */
+  doorInk?: string;
+  includeRoomLabels?: boolean;
 }
 
 const WALKABLE = new Set([CellType.Floor, CellType.Corridor, CellType.Door, CellType.SecretDoor, CellType.StairsUp, CellType.StairsDown]);
@@ -126,24 +138,46 @@ export function renderFloorPlan(
   }
 }
 
+/**
+ * Render every static (non-interactive) layer of the dungeon in world px:
+ * background, floor + walls, grid dots, door symbols, stairs, trap/treasure
+ * glyphs, and room labels. This is the single choke point shared by the live
+ * offscreen buffer and PNG/PDF/VTT exports — style changes here propagate
+ * everywhere.
+ */
+export function renderStaticLayers(
+  ctx: CanvasRenderingContext2D,
+  dungeon: Dungeon,
+  opts: StaticLayerOptions,
+): void {
+  const {
+    cellSize, theme, showGrid, hiddenFeatureTypes,
+    doorInk = theme.ink,
+    includeRoomLabels = true,
+  } = opts;
+
+  ctx.fillStyle = theme.wall;
+  ctx.fillRect(0, 0, dungeon.width * cellSize, dungeon.height * cellSize);
+
+  renderFloorPlan(ctx, dungeon, cellSize, theme, showGrid);
+
+  const rc = rough.canvas(ctx.canvas as HTMLCanvasElement);
+  drawSpecialCells(rc, ctx, dungeon, cellSize, theme, hiddenFeatureTypes);
+  drawDoorSymbols(ctx, dungeon, cellSize, doorInk, hiddenFeatureTypes);
+
+  if (includeRoomLabels) {
+    drawRoomLabels(ctx, dungeon, cellSize, theme);
+  }
+}
+
 export function renderDungeon(
   ctx: CanvasRenderingContext2D,
   dungeon: Dungeon,
   options: RenderOptions
 ): void {
   const { cellSize, showGrid, theme, selectedRoomId, hoveredRoomId, hiddenFeatureTypes } = options;
-  const { width, height } = dungeon;
-  const canvasWidth = width * cellSize;
-  const canvasHeight = height * cellSize;
 
-  const rc = rough.canvas(ctx.canvas);
-
-  ctx.fillStyle = theme.wall;
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-
-  renderFloorPlan(ctx, dungeon, cellSize, theme, showGrid);
-
-  drawSpecialCells(rc, ctx, dungeon, cellSize, theme, hiddenFeatureTypes);
+  renderStaticLayers(ctx, dungeon, { cellSize, theme, showGrid, hiddenFeatureTypes });
 
   if (selectedRoomId !== null) {
     drawRoomOverlay(ctx, dungeon, selectedRoomId, cellSize, theme.roomHighlight);
@@ -152,8 +186,6 @@ export function renderDungeon(
   if (hoveredRoomId !== null && hoveredRoomId !== selectedRoomId) {
     drawRoomOverlay(ctx, dungeon, hoveredRoomId, cellSize, theme.roomHover);
   }
-
-  drawRoomLabels(ctx, dungeon, cellSize, theme);
 }
 
 function isWalkable(cell: Cell | undefined): boolean {
@@ -369,24 +401,9 @@ export function drawSpecialCells(
   hidden: ReadonlySet<FeatureType> = new Set()
 ): void {
   const { width, height, grid } = dungeon;
-  const featureById = new Map(dungeon.features.map((f) => [f.id, f]));
 
-  // Pre-group door/secret-door cells by featureId for wide-door span rendering
-  const doorCellGroups = new Map<number, Array<{ x: number; y: number }>>();
-  for (let y = 0; y < height; y++) {
-    const row = grid[y];
-    if (!row) continue;
-    for (let x = 0; x < width; x++) {
-      const cell = row[x];
-      if (!cell || cell.featureId === null) continue;
-      if (cell.type !== CellType.Door && cell.type !== CellType.SecretDoor) continue;
-      const fid = cell.featureId;
-      if (!doorCellGroups.has(fid)) doorCellGroups.set(fid, []);
-      doorCellGroups.get(fid)!.push({ x, y });
-    }
-  }
-  const renderedDoorFeatures = new Set<number>();
-
+  // Doors/secret doors are rendered as cartographic symbols by drawDoorSymbols;
+  // only stairs remain cell-driven here.
   for (let y = 0; y < height; y++) {
     const row = grid[y];
     if (!row) continue;
@@ -398,77 +415,6 @@ export function drawSpecialCells(
       const py = y * cellSize;
 
       switch (cell.type) {
-        case CellType.Door: {
-          const fid = cell.featureId;
-          const featureType = fid !== null ? featureById.get(fid)?.type : undefined;
-          if (featureType !== undefined && hidden.has(featureType)) break;
-          if (fid !== null && renderedDoorFeatures.has(fid)) break;
-          if (fid !== null) renderedDoorFeatures.add(fid);
-
-          const cells = fid !== null ? (doorCellGroups.get(fid) ?? [{ x, y }]) : [{ x, y }];
-          const xs = cells.map((c) => c.x);
-          const ys = cells.map((c) => c.y);
-          const minX = Math.min(...xs);
-          const minY = Math.min(...ys);
-          const rpx = minX * cellSize;
-          const rpy = minY * cellSize;
-          // Multi-cell: orientation from cell arrangement (same y = horizontal = ns)
-          // Single-cell: check which side has the adjacent room cell
-          const isNs = cells.length > 1
-            ? new Set(ys).size === 1
-            : (() => {
-                const north = grid[minY - 1]?.[minX];
-                const south = grid[minY + 1]?.[minX];
-                return (north !== undefined && north.roomId !== null) ||
-                       (south !== undefined && south.roomId !== null);
-              })();
-          const spanW = isNs ? cells.length * cellSize : cellSize;
-          const spanH = isNs ? cellSize : cells.length * cellSize;
-
-          rc.rectangle(rpx + cellSize * 0.1, rpy + (isNs ? cellSize * 0.4 : cellSize * 0.1),
-            spanW - cellSize * 0.2, isNs ? cellSize * 0.2 : spanH - cellSize * 0.2, {
-            fill: theme.door,
-            fillStyle: "solid",
-            stroke: theme.ink,
-            strokeWidth: 1,
-            roughness: 0.8,
-          });
-          break;
-        }
-        case CellType.SecretDoor: {
-          if (hidden.has(FeatureType.SecretDoor)) break;
-          const fid = cell.featureId;
-          if (fid !== null && renderedDoorFeatures.has(fid)) break;
-          if (fid !== null) renderedDoorFeatures.add(fid);
-
-          const cells = fid !== null ? (doorCellGroups.get(fid) ?? [{ x, y }]) : [{ x, y }];
-          const xs = cells.map((c) => c.x);
-          const ys = cells.map((c) => c.y);
-          const minX = Math.min(...xs);
-          const minY = Math.min(...ys);
-          const rpx = minX * cellSize;
-          const rpy = minY * cellSize;
-          const isNs = cells.length > 1
-            ? new Set(ys).size === 1
-            : (() => {
-                const north = grid[minY - 1]?.[minX];
-                const south = grid[minY + 1]?.[minX];
-                return (north !== undefined && north.roomId !== null) ||
-                       (south !== undefined && south.roomId !== null);
-              })();
-          const spanW = isNs ? cells.length * cellSize : cellSize;
-          const spanH = isNs ? cellSize : cells.length * cellSize;
-
-          rc.rectangle(rpx + cellSize * 0.1, rpy + (isNs ? cellSize * 0.4 : cellSize * 0.1),
-            spanW - cellSize * 0.2, isNs ? cellSize * 0.2 : spanH - cellSize * 0.2, {
-            fill: theme.secretDoor,
-            fillStyle: "solid",
-            stroke: theme.ink,
-            strokeWidth: 1,
-            roughness: 0.8,
-          });
-          break;
-        }
         case CellType.StairsUp:
           if (!hidden.has(FeatureType.StairsUp)) drawStairs(rc, px, py, cellSize, theme, true);
           break;
@@ -486,8 +432,10 @@ export function drawSpecialCells(
   ctx.textBaseline = "middle";
   for (const feature of dungeon.features) {
     if (feature.type === FeatureType.Trap && !hidden.has(FeatureType.Trap)) {
+      ctx.fillStyle = theme.trap;
       ctx.fillText("\u26A0", feature.x * cellSize + cellSize / 2, feature.y * cellSize + cellSize / 2);
     } else if (feature.type === FeatureType.Treasure && !hidden.has(FeatureType.Treasure)) {
+      ctx.fillStyle = theme.treasure;
       ctx.fillText("$", feature.x * cellSize + cellSize / 2, feature.y * cellSize + cellSize / 2);
     }
   }
@@ -644,29 +592,27 @@ export function getRoomAtCell(
 // ─── OffscreenCanvas buffer ───────────────────────────────────────────────────
 
 /**
- * Pre-render the dungeon floor plan onto an OffscreenCanvas.
- * Callers blit this with ctx.drawImage() during pan/zoom for near-zero CPU cost.
- * The buffer includes the full floor + walls + grid dots but NOT interactive overlays.
+ * Pre-render the full static layer stack onto an OffscreenCanvas (floor, walls,
+ * grid, door symbols, stairs, glyphs, labels — everything but interactive
+ * overlays). Callers blit it with drawImage() during pan/zoom for near-zero cost.
  *
- * `scale` multiplies the buffer's pixel resolution (e.g. devicePixelRatio) while
- * all drawing stays in world CSS-px coordinates; blit with 9-arg drawImage back
- * to `width*cellSize × height*cellSize` world units.
+ * `scale` multiplies the buffer's pixel resolution (e.g. devicePixelRatio ×
+ * zoom bucket) while all drawing stays in world CSS-px coordinates; blit with
+ * 9-arg drawImage back to `width*cellSize × height*cellSize` world units.
  */
 export function buildDungeonBuffer(
   dungeon: Dungeon,
-  cellSize: number,
-  theme: ThemePalette,
+  opts: StaticLayerOptions,
   scale = 1,
 ): OffscreenCanvas {
+  const { cellSize } = opts;
   const buf = new OffscreenCanvas(
     Math.ceil(dungeon.width * cellSize * scale),
     Math.ceil(dungeon.height * cellSize * scale),
   );
   const ctx = buf.getContext("2d") as unknown as CanvasRenderingContext2D;
   ctx.scale(scale, scale);
-  ctx.fillStyle = theme.wall;
-  ctx.fillRect(0, 0, dungeon.width * cellSize, dungeon.height * cellSize);
-  renderFloorPlan(ctx, dungeon, cellSize, theme, true);
+  renderStaticLayers(ctx, dungeon, opts);
   return buf;
 }
 

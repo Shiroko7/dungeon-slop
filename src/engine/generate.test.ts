@@ -849,7 +849,7 @@ describe("stress — constructed layout (50 configs)", () => {
       dead_ends:        DEAD_ENDS[Math.floor(i / CORRIDORS.length) % DEAD_ENDS.length],
       room_density:     "Exact",
       room_count:       ROOM_COUNTS[i % ROOM_COUNTS.length],
-      room_shapes:      [...SHAPE_SETS[i % SHAPE_SETS.length]],
+      room_shapes:      [...SHAPE_SETS[i % SHAPE_SETS.length]!],
       ...GRID_SIZES[i % GRID_SIZES.length],
     });
     test(
@@ -869,7 +869,7 @@ describe("stress — organic layout (50 configs)", () => {
       dead_ends:    DEAD_ENDS[Math.floor(i / CORRIDORS.length) % DEAD_ENDS.length],
       room_density: "Exact",
       room_count:   ROOM_COUNTS[i % ROOM_COUNTS.length],
-      room_shapes:  [...SHAPE_SETS[i % SHAPE_SETS.length]],
+      room_shapes:  [...SHAPE_SETS[i % SHAPE_SETS.length]!],
       ...GRID_SIZES[i % GRID_SIZES.length],
     });
     test(
