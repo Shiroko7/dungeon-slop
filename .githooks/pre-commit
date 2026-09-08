@@ -1,0 +1,41 @@
+#!/bin/sh
+# Backstop against committing secrets. .gitignore is the primary defence; this
+# catches the cases it misses — a renamed env file, a key pasted into source, a
+# `git add -f`. Bypass deliberately with `git commit --no-verify` if you must.
+
+fail=0
+
+# 1. Any env file being staged at all.
+staged_env=$(git diff --cached --name-only --diff-filter=ACM   | grep -E '(^|/)\.env(\..*)?$'   | grep -vE '\.(example|sample|template)$' || true)
+if [ -n "$staged_env" ]; then
+  echo "BLOCKED: refusing to commit an environment file:"
+  echo "$staged_env" | sed 's/^/  /'
+  echo "  Unstage it:  git restore --staged <file>"
+  fail=1
+fi
+
+# 2. Key-shaped strings in the staged content of any file.
+#    Patterns are provider prefixes, so they do not fire on ordinary code.
+patterns='AIza[0-9A-Za-z_-]{30,}|sk-ant-[0-9A-Za-z_-]{20,}|sk-or-v1-[0-9a-f]{40,}|sk-proj-[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z]{40,}|pa-[0-9A-Za-z_-]{30,}|gsk_[0-9A-Za-z]{40,}'
+
+for file in $(git diff --cached --name-only --diff-filter=ACM); do
+  # Added lines only, so pre-existing text never blocks an unrelated commit.
+  # Report the COUNT and never the match: a hook that echoes the secret it
+  # caught leaks it into terminal scrollback and CI logs, which is the very
+  # thing being prevented.
+  hits=$(git diff --cached -U0 -- "$file" | grep '^+' | grep -vE '^\+\+\+' | grep -cE "$patterns" || true)
+  if [ "$hits" -gt 0 ] 2>/dev/null; then
+    echo "BLOCKED: $hits line(s) in $file look like an API key."
+    echo "  (value withheld on purpose — open the file yourself to check)"
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo ""
+  echo "Nothing was committed. If a key ever did reach a commit, rotate it —"
+  echo "rewriting history does not un-leak a key that was pushed."
+  exit 1
+fi
+
+exit 0

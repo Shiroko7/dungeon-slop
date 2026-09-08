@@ -12,7 +12,8 @@ coverage
 
 # logs
 logs
-_.log
+*.log
+.dev-*.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # dotenv environment variable files
@@ -35,3 +36,14 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # playwright-mcp session artifacts
 .playwright-mcp/
+
+# notes index (campaign notes database)
+notes.sqlite
+notes.sqlite-shm
+notes.sqlite-wal
+
+# debug screenshots dropped at the repo root during development
+/*.png
+
+# agent scratch notes - contain absolute local paths, and are not project docs
+.claude/agent-memory/
