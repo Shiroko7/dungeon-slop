@@ -1,7 +1,11 @@
-import type { AIProvider, AICompletionOptions, AICompletionResult, AIMessage } from "../types.ts";
+import type { AIProvider, AIModelInfo, AICompletionOptions, AICompletionResult, AIMessage } from "../types.ts";
 
 const BASE_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-haiku-4-5-20251001";
+
+const MODELS: AIModelInfo[] = [
+  { id: MODEL, label: "Claude Haiku 4.5", thinkingLevels: [] },
+];
 
 interface AnthropicMessage {
   role: "user" | "assistant";
@@ -48,14 +52,14 @@ function buildHeaders(apiKey: string): Record<string, string> {
 
 export const claudeProvider: AIProvider = {
   name: "claude",
-  models: [MODEL],
+  models: MODELS,
   defaultModel: MODEL,
 
   async complete(apiKey: string, options: AICompletionOptions): Promise<AICompletionResult> {
     const { system, messages } = convertMessages(options.messages);
 
     const body: Record<string, unknown> = {
-      model: MODEL,
+      model: options.model ?? MODEL,
       max_tokens: options.maxTokens ?? 4096,
       messages,
     };
@@ -94,7 +98,7 @@ export const claudeProvider: AIProvider = {
     const { system, messages } = convertMessages(options.messages);
 
     const body: Record<string, unknown> = {
-      model: MODEL,
+      model: options.model ?? MODEL,
       max_tokens: options.maxTokens ?? 4096,
       messages,
       stream: true,
@@ -122,7 +126,7 @@ export const claudeProvider: AIProvider = {
     const decoder = new TextDecoder();
 
     let fullContent = "";
-    let modelName = MODEL;
+    let modelName = options.model ?? MODEL;
     let inputTokens = 0;
     let outputTokens = 0;
     let buffer = "";

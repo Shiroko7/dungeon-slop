@@ -1,6 +1,7 @@
 import { DungeonConfigSchema } from "../ai/schema.ts";
 import type { DungeonConfig } from "../ai/schema.ts";
-import { generateDungeon } from "../engine/generate.ts";
+import { generateDungeon, generateFromBlueprint } from "../engine/generate.ts";
+import { BlueprintSchema, normalizeBlueprint } from "../ai/blueprint.ts";
 
 export async function handleGenerateDungeon(req: Request): Promise<Response> {
   let body: unknown;
@@ -13,7 +14,14 @@ export async function handleGenerateDungeon(req: Request): Promise<Response> {
     );
   }
 
-  const validation = DungeonConfigSchema.safeParse(body);
+  // Two body shapes: a bare config (the original contract, still used by the
+  // reroll path) or { config, blueprint } when a floor plan drives the layout.
+  const envelope = body as { config?: unknown; blueprint?: unknown };
+  const hasEnvelope =
+    typeof envelope === "object" && envelope !== null && envelope.config !== undefined;
+  const rawConfig = hasEnvelope ? envelope.config : body;
+
+  const validation = DungeonConfigSchema.safeParse(rawConfig);
   if (!validation.success) {
     const errors = validation.error.issues.map(
       (i) => `${i.path.join(".")}: ${i.message}`,
@@ -28,7 +36,20 @@ export async function handleGenerateDungeon(req: Request): Promise<Response> {
   const startTime = performance.now();
 
   try {
-    const dungeon = generateDungeon(config);
+    let dungeon;
+    if (hasEnvelope && envelope.blueprint !== undefined && envelope.blueprint !== null) {
+      const parsed = BlueprintSchema.safeParse(envelope.blueprint);
+      if (!parsed.success) {
+        const details = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+        return new Response(JSON.stringify({ error: "Invalid blueprint", details }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      dungeon = generateFromBlueprint(normalizeBlueprint(parsed.data).blueprint, config);
+    } else {
+      dungeon = generateDungeon(config);
+    }
     const elapsed = performance.now() - startTime;
 
     return new Response(

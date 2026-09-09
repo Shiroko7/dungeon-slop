@@ -1,7 +1,11 @@
-import type { AIProvider, AICompletionOptions, AICompletionResult, AIMessage } from "../types.ts";
+import type { AIProvider, AIModelInfo, AICompletionOptions, AICompletionResult, AIMessage } from "../types.ts";
 
 const BASE_URL = "http://localhost:11434";
 const DEFAULT_MODEL = "qwen3:8b";
+
+const MODELS: AIModelInfo[] = [
+  { id: DEFAULT_MODEL, label: "qwen3:8b (local)", thinkingLevels: [] },
+];
 
 interface OllamaMessage {
   role: "system" | "user" | "assistant";
@@ -22,12 +26,12 @@ function convertMessages(messages: AIMessage[]): OllamaMessage[] {
 
 export const ollamaProvider: AIProvider = {
   name: "ollama",
-  models: [DEFAULT_MODEL],
+  models: MODELS,
   defaultModel: DEFAULT_MODEL,
 
   async complete(_apiKey: string, options: AICompletionOptions): Promise<AICompletionResult> {
     const body: Record<string, unknown> = {
-      model: DEFAULT_MODEL,
+      model: options.model ?? DEFAULT_MODEL,
       messages: convertMessages(options.messages),
       stream: false,
       think: false,
@@ -65,7 +69,7 @@ export const ollamaProvider: AIProvider = {
 
   async *streamComplete(_apiKey: string, options: AICompletionOptions): AsyncGenerator<string, AICompletionResult> {
     const body: Record<string, unknown> = {
-      model: DEFAULT_MODEL,
+      model: options.model ?? DEFAULT_MODEL,
       messages: convertMessages(options.messages),
       stream: true,
       think: false,

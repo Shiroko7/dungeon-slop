@@ -1,12 +1,19 @@
-import { getProvider, getApiKey } from "../ai/provider-registry.ts";
+import { getProvider, getApiKey, resolveModel } from "../ai/provider-registry.ts";
 import { DungeonConfigSchema } from "../ai/schema.ts";
 import { buildArchitectMessages } from "../ai/prompts/architect.ts";
-import type { AIMessage } from "../ai/types.ts";
+import type { AIMessage, ThinkingLevel } from "../ai/types.ts";
+import { recordUsage } from "../db/usage.ts";
 
 interface GenerateConfigBody {
   prompt: string;
   temperature?: number;
   provider?: string;
+  model?: string;
+  thinkingLevel?: ThinkingLevel;
+  includeThoughts?: boolean;
+  campaignId?: number;
+  dungeonId?: number;
+  chatId?: number;
   conversationHistory?: AIMessage[];
 }
 
@@ -25,7 +32,7 @@ export async function handleGenerateConfig(req: Request): Promise<Response> {
     );
   }
 
-  const { prompt, temperature, provider, conversationHistory } = body as GenerateConfigBody;
+  const { prompt, temperature, provider, model, thinkingLevel, includeThoughts, campaignId, dungeonId, chatId, conversationHistory } = body as GenerateConfigBody;
 
   if (typeof prompt !== "string") {
     return new Response(
@@ -36,6 +43,7 @@ export async function handleGenerateConfig(req: Request): Promise<Response> {
 
   const providerName = provider ?? "gemini";
   const aiProvider = getProvider(providerName);
+  const modelName = resolveModel(providerName, model);
   const apiKey = getApiKey(providerName);
   const messages = buildArchitectMessages(prompt, conversationHistory);
 
@@ -49,6 +57,9 @@ export async function handleGenerateConfig(req: Request): Promise<Response> {
           messages,
           temperature: temperature ?? 0.7,
           responseFormat: "json",
+          model: modelName,
+          thinkingLevel,
+          includeThoughts,
         });
 
         let result;
@@ -62,6 +73,19 @@ export async function handleGenerateConfig(req: Request): Promise<Response> {
           fullText += token;
           controller.enqueue(encoder.encode(sseEvent("token", { text: token })));
         }
+
+        recordUsage({
+          operation: "config",
+          provider: providerName,
+          model: result?.model ?? modelName,
+          inputTokens: result?.usage.inputTokens ?? 0,
+          outputTokens: result?.usage.outputTokens ?? 0,
+          thinkingTokens: result?.usage.thinkingTokens ?? 0,
+          reasoning: result?.thoughts ?? null,
+          campaignId,
+          dungeonId,
+          chatId,
+        });
 
         let parsed: unknown;
         try {
@@ -85,7 +109,7 @@ export async function handleGenerateConfig(req: Request): Promise<Response> {
                   type: "config",
                   config: validation.data,
                   usage: result?.usage,
-                  model: aiProvider.defaultModel,
+                  model: result?.model ?? modelName,
                 }),
               ),
             );
@@ -100,7 +124,7 @@ export async function handleGenerateConfig(req: Request): Promise<Response> {
                   config: obj.config,
                   validationErrors: errors,
                   usage: result?.usage,
-                  model: aiProvider.defaultModel,
+                  model: result?.model ?? modelName,
                 }),
               ),
             );
@@ -112,7 +136,7 @@ export async function handleGenerateConfig(req: Request): Promise<Response> {
                 type: "clarification",
                 clarification: obj.clarification,
                 usage: result?.usage,
-                model: aiProvider.defaultModel,
+                model: result?.model ?? modelName,
               }),
             ),
           );
@@ -123,7 +147,7 @@ export async function handleGenerateConfig(req: Request): Promise<Response> {
                 type: "unknown",
                 data: obj,
                 usage: result?.usage,
-                model: aiProvider.defaultModel,
+                model: result?.model ?? modelName,
               }),
             ),
           );

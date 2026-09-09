@@ -1,15 +1,29 @@
-import { getProvider, getApiKey } from "../ai/provider-registry.ts";
+import { getProvider, getApiKey, resolveModel } from "../ai/provider-registry.ts";
+import type { ThinkingLevel } from "../ai/types.ts";
+import { recordUsage } from "../db/usage.ts";
 import { buildNarratorMessages } from "../ai/prompts/narrator.ts";
 import type { Room, Corridor } from "../engine/types.ts";
 import type { DungeonConfig } from "../ai/schema.ts";
 import type { RoomDescription } from "../engine/types.ts";
+import type { AIMessage } from "../ai/types.ts";
 
 interface DescribeRoomsBody {
   rooms: Room[];
+  /** Every room on the map. Needed so a batched slice can still resolve the
+   *  "leadsTo" of a passage pointing at a room outside the batch. */
+  allRooms?: Room[];
   corridors?: Corridor[];
   config: DungeonConfig;
   temperature?: number;
   provider?: string;
+  model?: string;
+  thinkingLevel?: ThinkingLevel;
+  includeThoughts?: boolean;
+  sourcePrompt?: string;
+  conversationHistory?: AIMessage[];
+  campaignId?: number;
+  dungeonId?: number;
+  chatId?: number;
 }
 
 interface DescribeRoomBody {
@@ -19,6 +33,14 @@ interface DescribeRoomBody {
   config: DungeonConfig;
   temperature?: number;
   provider?: string;
+  model?: string;
+  thinkingLevel?: ThinkingLevel;
+  includeThoughts?: boolean;
+  sourcePrompt?: string;
+  conversationHistory?: AIMessage[];
+  campaignId?: number;
+  dungeonId?: number;
+  chatId?: number;
 }
 
 function sseEvent(event: string, data: unknown): string {
@@ -36,7 +58,7 @@ export async function handleDescribeRooms(req: Request): Promise<Response> {
     );
   }
 
-  const { rooms, corridors, config, temperature, provider } = body as DescribeRoomsBody;
+  const { rooms, allRooms, corridors, config, temperature, provider, model, thinkingLevel, includeThoughts, campaignId, dungeonId, chatId, sourcePrompt, conversationHistory } = body as DescribeRoomsBody;
 
   if (!Array.isArray(rooms) || !config) {
     return new Response(
@@ -47,8 +69,9 @@ export async function handleDescribeRooms(req: Request): Promise<Response> {
 
   const providerName = provider ?? "gemini";
   const aiProvider = getProvider(providerName);
+  const modelName = resolveModel(providerName, model);
   const apiKey = getApiKey(providerName);
-  const messages = buildNarratorMessages(rooms, rooms, corridors ?? [], config);
+  const messages = buildNarratorMessages(rooms, allRooms ?? rooms, corridors ?? [], config, { prompt: sourcePrompt, history: conversationHistory });
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -60,6 +83,9 @@ export async function handleDescribeRooms(req: Request): Promise<Response> {
           messages,
           temperature: temperature ?? 0.8,
           responseFormat: "json",
+          model: modelName,
+          thinkingLevel,
+          includeThoughts,
         });
 
         let result;
@@ -73,6 +99,19 @@ export async function handleDescribeRooms(req: Request): Promise<Response> {
           fullText += token;
           controller.enqueue(encoder.encode(sseEvent("token", { text: token })));
         }
+
+        recordUsage({
+          operation: "rooms",
+          provider: providerName,
+          model: result?.model ?? modelName,
+          inputTokens: result?.usage.inputTokens ?? 0,
+          outputTokens: result?.usage.outputTokens ?? 0,
+          thinkingTokens: result?.usage.thinkingTokens ?? 0,
+          reasoning: result?.thoughts ?? null,
+          campaignId,
+          dungeonId,
+          chatId,
+        });
 
         let parsed: unknown;
         try {
@@ -93,7 +132,7 @@ export async function handleDescribeRooms(req: Request): Promise<Response> {
             sseEvent("complete", {
               descriptions: Array.isArray(descriptions) ? descriptions : [],
               usage: result?.usage,
-              model: aiProvider.defaultModel,
+              model: result?.model ?? modelName,
             }),
           ),
         );
@@ -126,7 +165,7 @@ export async function handleDescribeRoom(req: Request, roomId: string): Promise<
     );
   }
 
-  const { room, allRooms, corridors, config, temperature, provider } = body as DescribeRoomBody;
+  const { room, allRooms, corridors, config, temperature, provider, model, thinkingLevel, includeThoughts, campaignId, dungeonId, chatId, sourcePrompt, conversationHistory } = body as DescribeRoomBody;
 
   if (!room || !config) {
     return new Response(
@@ -144,8 +183,9 @@ export async function handleDescribeRoom(req: Request, roomId: string): Promise<
 
   const providerName = provider ?? "gemini";
   const aiProvider = getProvider(providerName);
+  const modelName = resolveModel(providerName, model);
   const apiKey = getApiKey(providerName);
-  const messages = buildNarratorMessages([room], allRooms ?? [room], corridors ?? [], config);
+  const messages = buildNarratorMessages([room], allRooms ?? [room], corridors ?? [], config, { prompt: sourcePrompt, history: conversationHistory });
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -157,6 +197,9 @@ export async function handleDescribeRoom(req: Request, roomId: string): Promise<
           messages,
           temperature: temperature ?? 0.8,
           responseFormat: "json",
+          model: modelName,
+          thinkingLevel,
+          includeThoughts,
         });
 
         let result;
@@ -170,6 +213,19 @@ export async function handleDescribeRoom(req: Request, roomId: string): Promise<
           fullText += token;
           controller.enqueue(encoder.encode(sseEvent("token", { text: token })));
         }
+
+        recordUsage({
+          operation: "room",
+          provider: providerName,
+          model: result?.model ?? modelName,
+          inputTokens: result?.usage.inputTokens ?? 0,
+          outputTokens: result?.usage.outputTokens ?? 0,
+          thinkingTokens: result?.usage.thinkingTokens ?? 0,
+          reasoning: result?.thoughts ?? null,
+          campaignId,
+          dungeonId,
+          chatId,
+        });
 
         let parsed: unknown;
         try {
@@ -191,7 +247,7 @@ export async function handleDescribeRoom(req: Request, roomId: string): Promise<
             sseEvent("complete", {
               description: description ?? null,
               usage: result?.usage,
-              model: aiProvider.defaultModel,
+              model: result?.model ?? modelName,
             }),
           ),
         );
