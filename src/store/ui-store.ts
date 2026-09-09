@@ -88,7 +88,7 @@ export const useUIStore = create<UIState>()(
       canvasW: 0,
       canvasH: 0,
       isSidebarOpen: true,
-      darkMode: false,
+      darkMode: true,
       promptText: "",
       hiddenFeatureTypes: [] as FeatureType[],
 

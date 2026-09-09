@@ -23,6 +23,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
     "jspdf": "^2",
     "polybooljs": "^1.2.2",
     "react": "^19",
