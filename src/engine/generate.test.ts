@@ -363,20 +363,37 @@ function corridorCellsAdjacentToRooms(dungeon: ReturnType<typeof generateDungeon
 
 interface CorridorInRoom { corridorId: number; x: number; y: number; roomId: number }
 
+/*
+ * A corridor connects rooms; it is never part of one.
+ *
+ * There is no exemption for its own endpoints. This used to allow a corridor to
+ * run through the rooms it joined - carving ran centre to centre, so most of a
+ * corridor's path WAS room floor - and to silently skip a third room's cells,
+ * which left a hole in the path and a route that walked through that room.
+ */
 function corridorCellsInRooms(dungeon: ReturnType<typeof generateDungeon>): CorridorInRoom[] {
   const result: CorridorInRoom[] = [];
   for (const corridor of dungeon.corridors) {
     for (const pos of corridor.path) {
       const cell = dungeon.grid[pos.y]?.[pos.x];
-      if (cell === undefined) continue;
-      // The corridor carved into a room that isn't one of its endpoints.
-      if (
-        cell.type === CellType.Floor &&
-        cell.roomId !== null &&
-        cell.roomId !== corridor.roomA &&
-        cell.roomId !== corridor.roomB
-      ) {
-        result.push({ corridorId: corridor.id, x: pos.x, y: pos.y, roomId: cell.roomId });
+      if (cell === undefined || cell.roomId === null) continue;
+      result.push({ corridorId: corridor.id, x: pos.x, y: pos.y, roomId: cell.roomId });
+    }
+  }
+  return result;
+}
+
+/** A path with a hole in it is a route through whatever fills the hole. */
+function corridorPathBreaks(
+  dungeon: ReturnType<typeof generateDungeon>,
+): Array<{ corridorId: number; from: string; to: string }> {
+  const result: Array<{ corridorId: number; from: string; to: string }> = [];
+  for (const corridor of dungeon.corridors) {
+    for (let i = 1; i < corridor.path.length; i++) {
+      const a = corridor.path[i - 1]!;
+      const b = corridor.path[i]!;
+      if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) !== 1) {
+        result.push({ corridorId: corridor.id, from: `(${a.x},${a.y})`, to: `(${b.x},${b.y})` });
       }
     }
   }
@@ -744,7 +761,14 @@ function assertAll(dungeon: ReturnType<typeof generateDungeon>, label: string) {
   const cir = corridorCellsInRooms(dungeon);
   if (cir.length > 0) {
     const s = cir.slice(0, 3).map(c => `corridor=${c.corridorId} cell(${c.x},${c.y}) room=${c.roomId}`).join(", ");
-    problems.push(`corridor cells in third-party rooms(${cir.length}): ${s}`);
+    problems.push(`corridor cells inside rooms(${cir.length}): ${s}`);
+  }
+
+  // 13b. corridor paths are unbroken walks
+  const breaks = corridorPathBreaks(dungeon);
+  if (breaks.length > 0) {
+    const s = breaks.slice(0, 3).map(b => `corridor=${b.corridorId} ${b.from}->${b.to}`).join(", ");
+    problems.push(`discontinuous corridor paths(${breaks.length}): ${s}`);
   }
 
   // NOTE: corridorOwnershipConflicts is intentionally NOT in assertAll.

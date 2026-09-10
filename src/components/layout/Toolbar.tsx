@@ -1,6 +1,9 @@
 import { useCallback, useState } from "react";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
+import { useCampaignStore } from "../../store/campaign-store.ts";
 import { useUIStore } from "../../store/ui-store.ts";
+import { navigate, paths } from "../../router/router.ts";
+import type { DungeonRecord } from "../../campaign/types.ts";
 import { Button } from "../shared/Button.tsx";
 
 const ZOOM_BTN_FACTOR = 1.2;
@@ -16,42 +19,56 @@ export function Toolbar() {
   const canUndo = useDungeonStore((s) => s._undoStack.length > 0);
   const canRedo = useDungeonStore((s) => s._redoStack.length > 0);
 
+  const campaignId = useDungeonStore((s) => s.campaignId);
+  const refreshContents = useCampaignStore((s) => s.refreshContents);
+
   const zoom = useUIStore((s) => s.zoom);
   const zoomAtAnchor = useUIStore((s) => s.zoomAtAnchor);
   const canvasW = useUIStore((s) => s.canvasW);
   const canvasH = useUIStore((s) => s.canvasH);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const resetView = useUIStore((s) => s.resetView);
-  const darkMode = useUIStore((s) => s.darkMode);
-  const toggleDarkMode = useUIStore((s) => s.toggleDarkMode);
-  const toggleSettings = useUIStore((s) => s.toggleSettings);
   const toggleExport = useUIStore((s) => s.toggleExport);
   const editMode = useUIStore((s) => s.editMode);
   const toggleEditMode = useUIStore((s) => s.toggleEditMode);
   const [seedInput, setSeedInput] = useState("");
 
+  /**
+   * Generating over a described map forks rather than overwrites, so a result
+   * here means "a new dungeon exists" — follow it, and refresh the list it was
+   * added to.
+   */
+  const followFork = useCallback(
+    async (record: DungeonRecord | null) => {
+      if (record === null || campaignId === null) return;
+      await refreshContents(campaignId);
+      navigate(paths.dungeon(campaignId, record.id));
+    },
+    [campaignId, refreshContents],
+  );
+
   const handleGenerateDungeon = useCallback(() => {
     if (!config || isGeneratingDungeon) return;
-    generateDungeonFromConfig();
-  }, [config, isGeneratingDungeon, generateDungeonFromConfig]);
+    void generateDungeonFromConfig().then(followFork);
+  }, [config, isGeneratingDungeon, generateDungeonFromConfig, followFork]);
 
   const handleReroll = useCallback(() => {
     if (!config || isGeneratingDungeon) return;
-    rerollDungeon();
-  }, [config, isGeneratingDungeon, rerollDungeon]);
+    void rerollDungeon().then(followFork);
+  }, [config, isGeneratingDungeon, rerollDungeon, followFork]);
 
   const handleSeedSubmit = useCallback(() => {
     if (!config || isGeneratingDungeon) return;
     const trimmed = seedInput.trim();
     if (!trimmed) {
-      rerollDungeon();
+      void rerollDungeon().then(followFork);
       return;
     }
     const parsed = parseInt(trimmed, 10);
     if (!Number.isNaN(parsed)) {
-      rerollDungeon(parsed);
+      void rerollDungeon(parsed).then(followFork);
     }
-  }, [config, isGeneratingDungeon, seedInput, rerollDungeon]);
+  }, [config, isGeneratingDungeon, seedInput, rerollDungeon, followFork]);
 
   // Toolbar zoom anchors at the viewport center
   const handleZoomIn = useCallback(() => {
@@ -166,24 +183,6 @@ export function Toolbar() {
           title="Export map and descriptions"
         >
           &#8595;
-        </Button>
-        <Button
-          variant="icon"
-          size="sm"
-          onClick={toggleSettings}
-          aria-label="Settings"
-          title="AI Settings"
-        >
-          &#9881;
-        </Button>
-        <Button
-          variant="icon"
-          size="sm"
-          onClick={toggleDarkMode}
-          aria-label="Toggle dark mode"
-          title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-        >
-          {darkMode ? "\u2600" : "\u263E"}
         </Button>
       </div>
     </div>

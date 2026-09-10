@@ -8,6 +8,7 @@ import { EditToolPalette } from "./EditToolPalette.tsx";
 import { EditEngine } from "../../engine/edit-engine.ts";
 import type { EditTool } from "../../engine/edit-engine.ts";
 import type { Dungeon, Room } from "../../engine/types.ts";
+import { isCaveShape } from "../../engine/types.ts";
 import { getTheme, type ThemePalette } from "../../renderer/themes/theme-engine.ts";
 import {
   renderStaticLayers,
@@ -107,7 +108,6 @@ interface CellColors {
   door: string; secret: string; stairsUp: string; stairsDown: string;
   grid: string; select: string; selectStroke: string;
   hover: string; hoverStroke: string; roomOutline: string;
-  doorInk: string;
 }
 
 function getCellColors(): CellColors {
@@ -127,7 +127,6 @@ function getCellColors(): CellColors {
     hover:        style.getPropertyValue("--cell-hover-highlight").trim()|| "rgba(105,101,219,0.18)",
     hoverStroke:  style.getPropertyValue("--cell-hover-stroke").trim()   || "rgba(105,101,219,0.6)",
     roomOutline:  style.getPropertyValue("--cell-room-outline").trim()   || "rgba(0,0,0,0.35)",
-    doorInk:      style.getPropertyValue("--cell-door-ink").trim()       || "#1e1c18",
   };
 }
 
@@ -212,7 +211,6 @@ export function DungeonCanvas() {
       theme,
       showGrid: true,
       hiddenFeatureTypes: new Set(hiddenFeatureTypes),
-      doorInk: cellColorsRef.current.doorInk,
     }, scale);
     bufferScaleRef.current = scale;
     dungeonBufferFor.current = dungeon;
@@ -288,7 +286,6 @@ export function DungeonCanvas() {
             theme: themeRef.current,
             showGrid: true,
             hiddenFeatureTypes: new Set(useUIStore.getState().hiddenFeatureTypes),
-            doorInk: cellColorsRef.current.doorInk,
           }, targetScale);
           bufferScaleRef.current = targetScale;
           dungeonBufferFor.current = d;
@@ -330,7 +327,7 @@ export function DungeonCanvas() {
       const theme  = themeRef.current;
       const colors = cellColorsRef.current;
 
-      ctx.fillStyle = theme.wall;
+      ctx.fillStyle = theme.paper;
       ctx.fillRect(0, 0, cssW, cssH);
 
       ctx.save();
@@ -354,7 +351,6 @@ export function DungeonCanvas() {
           theme,
           showGrid: true,
           hiddenFeatureTypes: new Set(useUIStore.getState().hiddenFeatureTypes),
-          doorInk: colors.doorInk,
         });
       }
 
@@ -407,7 +403,7 @@ export function DungeonCanvas() {
         if (hoveredRoomId !== null && hoveredRoomId !== selectedRoomId) {
           ctx.fillStyle = colors.hover;
           const hovRoom = d.rooms.find((r) => r.id === hoveredRoomId);
-          if (hovRoom && hovRoom.shape !== "Cave") {
+          if (hovRoom && !isCaveShape(hovRoom.shape)) {
             ctx.fill(createRoomPath(getRoomGeometry(hovRoom, CELL_SIZE)));
           } else {
             for (let y = 0; y < d.height; y++) {
@@ -437,7 +433,7 @@ export function DungeonCanvas() {
         if (selectedRoomId !== null) {
           ctx.fillStyle = colors.select;
           const selRoom = d.rooms.find((r) => r.id === selectedRoomId);
-          if (selRoom && selRoom.shape !== "Cave") {
+          if (selRoom && !isCaveShape(selRoom.shape)) {
             ctx.fill(createRoomPath(getRoomGeometry(selRoom, CELL_SIZE)));
           } else {
             for (let y = 0; y < d.height; y++) {
@@ -631,8 +627,20 @@ export function DungeonCanvas() {
 
   // ── Spacebar: temporary pan mode ──────────────────────────────────────────
   useEffect(() => {
+    const isTypingTarget = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null;
+      if (el === null) return false;
+      const tag = el.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el.isContentEditable
+      );
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== " ") return;
+      if (isTypingTarget(e.target)) return; // let text fields keep their spaces
       e.preventDefault(); // prevent page scroll
       if (e.repeat || isSpaceHeld.current) return;
       const { editMode, activeTool, setActiveTool } = useUIStore.getState();

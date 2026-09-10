@@ -171,7 +171,7 @@ function extractChambers(region: Region, targetCount: number): Room[] {
         height: h,
         centerX: Math.floor(chamberMinX + w / 2),
         centerY: Math.floor(chamberMinY + h / 2),
-        shape: "cave",
+        shape: "Cave",
         connections: [],
         features: [],
       });
@@ -189,7 +189,7 @@ function extractChambers(region: Region, targetCount: number): Room[] {
       height: h,
       centerX: Math.floor(minX + w / 2),
       centerY: Math.floor(minY + h / 2),
-      shape: "cave",
+      shape: "Cave",
       connections: [],
       features: [],
     });

@@ -35,8 +35,10 @@ interface Segment {
   y2: number;
 }
 
-export function exportVTT(dungeon: Dungeon): void {
+export async function exportVTT(dungeon: Dungeon): Promise<void> {
   const pxPerGrid = 140;
+  // Room labels use a webfont — ensure it's loaded before rasterizing
+  await document.fonts.ready;
 
   // Render map image
   const canvas = document.createElement("canvas");

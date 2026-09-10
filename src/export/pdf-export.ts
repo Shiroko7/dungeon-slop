@@ -5,8 +5,10 @@ import { renderDungeon } from "../renderer/canvas-renderer.ts";
 import { getTheme } from "../renderer/themes/theme-engine.ts";
 import { useUIStore } from "../store/ui-store.ts";
 
-export function exportPDF(dungeon: Dungeon): void {
+export async function exportPDF(dungeon: Dungeon): Promise<void> {
   const cellSize = 20;
+  // Room labels use a webfont — ensure it's loaded before rasterizing
+  await document.fonts.ready;
 
   const hidden = new Set(useUIStore.getState().hiddenFeatureTypes) as ReadonlySet<FeatureType>;
 

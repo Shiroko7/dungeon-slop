@@ -21,24 +21,27 @@ const SHAPE_MINIMUMS: Record<string, { w: number; h: number }> = {
   Cave:       { w: 5, h: 5 },
 };
 
-// Room size expressed as fractions of the grid's smaller dimension.
-// Calibrated so that at the default 50×50 grid the absolute cell counts
-// match the previous fixed values (Tiny→3-5, Small→4-7, Medium→5-10,
-// Large→8-15, Huge→12-20).
-const ROOM_SIZE_FRACTIONS: Record<string, { min: number; max: number }> = {
-  Tiny:   { min: 0.06, max: 0.10 },
-  Small:  { min: 0.08, max: 0.14 },
-  Medium: { min: 0.10, max: 0.20 },
-  Large:  { min: 0.16, max: 0.30 },
-  Huge:   { min: 0.24, max: 0.40 },
+/*
+ * Room size in GRID CELLS, absolute. One cell is 5 ft, so Huge is a 60-100 ft
+ * hall - which is already enormous for a room people fight in.
+ *
+ * This used to be a fraction of the grid's smaller dimension, which coupled two
+ * things that must stay independent: asking for a bigger MAP silently asked for
+ * bigger ROOMS. At 180x180 "Huge" resolved to 43-72 cells, i.e. a single 360 ft
+ * chamber, and because minLeafSize follows the room minimum the BSP could then
+ * only split three ways - so a bigger map produced FEWER, sillier rooms.
+ * A bigger map should mean more rooms, not inflated ones.
+ */
+export const ROOM_SIZE_CELLS: Record<string, { min: number; max: number }> = {
+  Tiny:   { min: 3,  max: 5 },
+  Small:  { min: 4,  max: 7 },
+  Medium: { min: 5,  max: 10 },
+  Large:  { min: 8,  max: 15 },
+  Huge:   { min: 12, max: 20 },
 };
 
-function getRoomSizeRange(sizeConfig: string, gridScale: number): { min: number; max: number } {
-  const f = ROOM_SIZE_FRACTIONS[sizeConfig] ?? ROOM_SIZE_FRACTIONS["Medium"]!;
-  return {
-    min: Math.max(3, Math.round(f.min * gridScale)),
-    max: Math.round(f.max * gridScale),
-  };
+function getRoomSizeRange(sizeConfig: string): { min: number; max: number } {
+  return ROOM_SIZE_CELLS[sizeConfig] ?? ROOM_SIZE_CELLS["Medium"]!;
 }
 
 function getDensityMargin(densityConfig: string): number {
@@ -56,10 +59,67 @@ function getDensityMargin(densityConfig: string): number {
   }
 }
 
-function getRoomCountFromDensity(density: string, gridW: number, gridH: number): number {
-  const area = gridW * gridH;
-  const factor = density === "Sparse" ? 2000 : density === "Moderate" ? 1000 : 500;
-  return Math.max(3, Math.min(50, Math.round(area / factor)));
+/**
+ * How much of the map should be room floor, by density. Room count follows from
+ * coverage divided by the area of one room, so asking for Huge rooms gives you
+ * FEWER of them rather than the same number inflated past the point of sense.
+ */
+const DENSITY_COVERAGE: Record<string, number> = {
+  Sparse: 0.10,
+  Moderate: 0.18,
+  Dense: 0.28,
+  Exact: 0.18,
+};
+
+/** How many copies of each room the symmetry pass will add. */
+export function mirrorFactor(symmetry: string): number {
+  if (symmetry === "Four-Way") return 4;
+  if (symmetry === "Horizontal" || symmetry === "Vertical" || symmetry === "Radial") return 2;
+  return 1;
+}
+
+export interface RoomBudget {
+  /** What the config asks for, counting mirrored copies. */
+  requested: number;
+  /** The most the BSP can actually place at this room size, mirrors included. */
+  capacity: number;
+  /** What will be built: min(requested, capacity). */
+  target: number;
+}
+
+/*
+ * Room count is capacity-checked up front rather than discovered by running out
+ * of leaves. The BSP cannot place more rooms than the grid has room-sized slots,
+ * and it used to just stop early and say nothing - a config asking for 32 rooms
+ * quietly produced 6. Now the shortfall is a value the caller can surface.
+ */
+export function planRoomBudget(config: DungeonConfig, width: number, height: number): RoomBudget {
+  const size = getRoomSizeRange(config.room_size);
+  const mirrors = mirrorFactor(config.symmetry ?? "None");
+
+  const requested = config.room_density === "Exact"
+    ? (config.room_count ?? 10)
+    : (() => {
+        const coverage = DENSITY_COVERAGE[config.room_density] ?? DENSITY_COVERAGE["Moderate"]!;
+        const avgArea = ((size.min + size.max) / 2) ** 2;
+        return Math.max(3, Math.min(100, Math.round((coverage * width * height) / avgArea)));
+      })();
+
+  // Each room needs a leaf of at least minLeafSize on a side, and symmetry
+  // restricts the root to a half or a quarter of the grid before mirroring.
+  const minLeaf = size.min + 2;
+  let rootW = width - 2;
+  let rootH = height - 2;
+  if (config.symmetry === "Horizontal" || config.symmetry === "Four-Way") rootW = Math.floor(rootW / 2);
+  if (config.symmetry === "Vertical" || config.symmetry === "Four-Way" || config.symmetry === "Radial") {
+    rootH = Math.floor(rootH / 2);
+  }
+  const capacity = Math.max(
+    mirrors,
+    Math.floor(rootW / minLeaf) * Math.floor(rootH / minLeaf) * mirrors,
+  );
+
+  return { requested, capacity, target: Math.min(requested, capacity) };
 }
 
 function splitNode(
@@ -183,11 +243,11 @@ export function generateBSP(
   config: DungeonConfig,
   rng: SeededRandom,
 ): Room[] {
-  const gridScale = Math.min(width, height);
-  const sizeRange = getRoomSizeRange(config.room_size, gridScale);
-  const targetCount = config.room_density === "Exact"
-    ? (config.room_count ?? 10)
-    : getRoomCountFromDensity(config.room_density, width, height);
+  const sizeRange = getRoomSizeRange(config.room_size);
+  const budget = planRoomBudget(config, width, height);
+  // The symmetry pass multiplies what we build here, so build only the share
+  // that survives mirroring - otherwise "exactly 10 rooms" yields 20, or 40.
+  const targetCount = Math.max(1, Math.floor(budget.target / mirrorFactor(config.symmetry ?? "None")));
   const densityMargin = getDensityMargin(config.room_density);
   const minLeafSize = sizeRange.min + 2;
 
@@ -214,7 +274,10 @@ export function generateBSP(
 
   const nodesToSplit: BSPNode[] = [root];
   let splitAttempts = 0;
-  const maxAttempts = 100;
+  // Reaching N leaves needs N-1 successful splits, and failed attempts count
+  // against the same budget. A flat 100 therefore capped delivery on any map
+  // asking for more than a few dozen rooms, no matter how much space it had.
+  const maxAttempts = targetCount * 4 + 100;
 
   while (nodesToSplit.length > 0 && splitAttempts < maxAttempts) {
     const leaves = collectLeaves(root);

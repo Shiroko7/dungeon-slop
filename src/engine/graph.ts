@@ -250,7 +250,10 @@ export function selectCorridorEdges(
     return !mstSet.has(`${lo},${hi}`);
   });
 
-  nonMst.sort((a, b) => b.weight - a.weight);
+  // Shortest first: extra edges exist to add loops between neighbours, and
+  // taking the longest ones instead produces exactly the map-spanning hallways
+  // the triangulation was chosen to avoid.
+  nonMst.sort((a, b) => a.weight - b.weight);
 
   const extraCount = Math.floor(nonMst.length * complexity);
   const selected = [...mstEdges];

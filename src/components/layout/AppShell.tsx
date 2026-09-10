@@ -1,50 +1,108 @@
-import { useUIStore } from "../../store/ui-store.ts";
+import { useEffect } from "react";
+import { useCampaignStore } from "../../store/campaign-store.ts";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
-import { Sidebar } from "./Sidebar.tsx";
-import { Toolbar } from "./Toolbar.tsx";
-import { DungeonCanvas } from "../canvas/DungeonCanvas.tsx";
-import { ExportActions } from "../canvas/ExportActions.tsx";
-import { DescribeActivityToast } from "../canvas/DescribeActivityToast.tsx";
-import { MapLegend } from "../canvas/MapLegend.tsx";
+import { useChatStore } from "../../store/chat-store.ts";
+import { useUIStore } from "../../store/ui-store.ts";
+import { campaignOf, linkProps, paths, useRoute } from "../../router/router.ts";
+import { Rail } from "./Rail.tsx";
+import { CampaignContext } from "./CampaignContext.tsx";
+import { DungeonContext } from "./DungeonContext.tsx";
+import { CampaignPicker } from "../views/CampaignPicker.tsx";
+import { CampaignHome } from "../views/CampaignHome.tsx";
+import { NotesView } from "../views/NotesView.tsx";
+import { UsageView } from "../views/UsageView.tsx";
+import { ChatView } from "../views/ChatView.tsx";
+import { DungeonView } from "../views/DungeonView.tsx";
 import { SettingsPopover } from "../panels/SettingsPopover.tsx";
 import { ExportPopover } from "../panels/ExportPopover.tsx";
 
+function NotFound({ path }: { path: string }) {
+  return (
+    <div className="view-blank">
+      <h1 className="view-blank-title">Nothing at that address</h1>
+      <p className="view-blank-body">
+        <code>{path}</code> doesn't match anything in the app.
+      </p>
+      <a className="view-blank-link" {...linkProps(paths.picker())}>
+        Back to campaigns
+      </a>
+    </div>
+  );
+}
+
+/**
+ * The three-zone shell: a constant rail, a context column that changes meaning
+ * with the section, and the workspace. The route decides all three, so there is
+ * exactly one place that knows what the app is currently showing.
+ */
 export function AppShell() {
+  const route = useRoute();
+  const openCampaign = useCampaignStore((s) => s.openCampaign);
+  const activeId = useCampaignStore((s) => s.active?.id ?? null);
+  const closeDungeon = useDungeonStore((s) => s.closeDungeon);
+  const closeChat = useChatStore((s) => s.close);
   const isSidebarOpen = useUIStore((s) => s.isSidebarOpen);
-  const dungeon = useDungeonStore((s) => s.dungeon);
-  const error = useDungeonStore((s) => s.error);
-  const setError = useDungeonStore((s) => s.setError);
+
+  const campaignId = campaignOf(route);
+
+  // Loading the campaign is the shell's job, not each view's: the rail and the
+  // context column both need it before the workspace has rendered anything.
+  useEffect(() => {
+    if (campaignId !== null && campaignId !== activeId) void openCampaign(campaignId);
+  }, [campaignId, activeId, openCampaign]);
+
+  // Leaving a dungeon flushes its pending autosave and drops the working copy,
+  // so the next one cannot inherit stale geometry.
+  useEffect(() => {
+    if (route.view !== "dungeon") closeDungeon();
+  }, [route.view, closeDungeon]);
+
+  useEffect(() => {
+    if (route.view !== "chat" && route.view !== "dungeon") closeChat();
+  }, [route.view, closeChat]);
+
+  if (route.view === "picker") return <CampaignPicker />;
+  if (route.view === "unknown") return <NotFound path={route.path} />;
+
+  const context =
+    route.view === "dungeon" ? (
+      <DungeonContext campaignId={route.campaignId} dungeonId={route.dungeonId} />
+    ) : (
+      <CampaignContext route={route} />
+    );
+
+  let workspace: React.ReactNode;
+  switch (route.view) {
+    case "campaign":
+      workspace = <CampaignHome campaignId={route.campaignId} />;
+      break;
+    case "notes":
+      workspace = <NotesView campaignId={route.campaignId} />;
+      break;
+    case "usage":
+      workspace = <UsageView campaignId={route.campaignId} />;
+      break;
+    case "chat":
+      workspace = <ChatView campaignId={route.campaignId} chatId={route.chatId} />;
+      break;
+    case "dungeon":
+      workspace = (
+        <DungeonView
+          campaignId={route.campaignId}
+          dungeonId={route.dungeonId}
+          roomId={route.roomId}
+        />
+      );
+      break;
+  }
 
   return (
     <div className="app-shell">
-      {isSidebarOpen && <Sidebar />}
-      <div className="main-area">
-        <Toolbar />
-        {error && (
-          <div className="error-banner">
-            <span className="error-banner-text">{error}</span>
-            <button className="error-banner-dismiss" onClick={() => setError(null)}>
-              &times;
-            </button>
-          </div>
-        )}
-        <div className="canvas-container">
-          <DungeonCanvas />
-          {!dungeon && (
-            <div className="canvas-empty-state">
-              <div className="canvas-empty-title">No Map Yet</div>
-              <div className="canvas-empty-subtitle">
-                Describe your dungeon in the sidebar, then hit Generate
-              </div>
-            </div>
-          )}
-          <DescribeActivityToast />
-          <MapLegend />
-          <ExportActions />
-        </div>
-        <SettingsPopover />
-        <ExportPopover />
-      </div>
+      <Rail route={route} />
+      {isSidebarOpen && context}
+      <main className="workspace">{workspace}</main>
+      <SettingsPopover />
+      <ExportPopover />
     </div>
   );
 }

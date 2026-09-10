@@ -1,4 +1,5 @@
 import type { SeededRandom } from "../lib/random.ts";
+import { isCaveShape, PENTAGON_W, PENTAGON_H } from "./types.ts";
 
 /**
  * Each carve function returns a Set of "x,y" keys representing floor cells
@@ -13,6 +14,7 @@ export function carveShape(
   height: number,
   rng: SeededRandom,
 ): Set<string> {
+  if (isCaveShape(shape)) return carveCave(x, y, width, height, rng);
   switch (shape) {
     case "Square":
       return carveSquare(x, y, width, height);
@@ -22,8 +24,6 @@ export function carveShape(
       return carveHexagonal(x, y, width, height);
     case "Pentagonal":
       return carvePentagonal(x, y, width, height);
-    case "Cave":
-      return carveCave(x, y, width, height, rng);
     case "Cross":
       return carveCross(x, y, width, height);
     case "Diamond":
@@ -51,10 +51,16 @@ function carveSquare(x: number, y: number, w: number, h: number): Set<string> {
   return carveRectangular(ox, oy, side, side);
 }
 
-// ─── Inclusive intersection helpers ──────────────────────────────────────────
-// For every cell we test 5 sample points (4 corners + center). If ANY falls
-// inside the shape, the cell is carved. All shape formulas exactly mirror the
-// renderer's geometry (room-shapes.ts) so grid ownership matches visual output.
+// ─── Cell-centre containment ─────────────────────────────────────────────────
+// A cell is carved when its CENTRE falls inside the shape. All shape formulas
+// exactly mirror the renderer's geometry (room-shapes.ts), so every cell the
+// room owns is a cell the map draws floor under.
+//
+// Testing 4 corners + centre and carving on any hit — which this used to do —
+// dilates the room by up to a full cell past the outline it is drawn with. That
+// leaves floor the player can stand on where the map shows solid rock, and
+// hands corridors an attachment cell outside the room's own wall, so the
+// doorway is carved somewhere the wall isn't.
 
 // ── Circle (matches renderer: r = min(w, h) / 2) ─────────────────────────────
 
@@ -63,14 +69,8 @@ function pointInCircle(sx: number, sy: number, cx: number, cy: number, r: number
   return dx * dx + dy * dy <= r * r;
 }
 
-function cellIntersectsCircle(px: number, py: number, cx: number, cy: number, r: number): boolean {
-  return (
-    pointInCircle(px,       py,       cx, cy, r) ||
-    pointInCircle(px + 1,   py,       cx, cy, r) ||
-    pointInCircle(px,       py + 1,   cx, cy, r) ||
-    pointInCircle(px + 1,   py + 1,   cx, cy, r) ||
-    pointInCircle(px + 0.5, py + 0.5, cx, cy, r)
-  );
+function cellCentreInCircle(px: number, py: number, cx: number, cy: number, r: number): boolean {
+  return pointInCircle(px + 0.5, py + 0.5, cx, cy, r);
 }
 
 // ── Diamond (matches renderer: r = min(w, h) / 2) ────────────────────────────
@@ -79,14 +79,8 @@ function pointInDiamond(sx: number, sy: number, cx: number, cy: number, r: numbe
   return Math.abs(sx - cx) + Math.abs(sy - cy) <= r;
 }
 
-function cellIntersectsDiamond(px: number, py: number, cx: number, cy: number, r: number): boolean {
-  return (
-    pointInDiamond(px,       py,       cx, cy, r) ||
-    pointInDiamond(px + 1,   py,       cx, cy, r) ||
-    pointInDiamond(px,       py + 1,   cx, cy, r) ||
-    pointInDiamond(px + 1,   py + 1,   cx, cy, r) ||
-    pointInDiamond(px + 0.5, py + 0.5, cx, cy, r)
-  );
+function cellCentreInDiamond(px: number, py: number, cx: number, cy: number, r: number): boolean {
+  return pointInDiamond(px + 0.5, py + 0.5, cx, cy, r);
 }
 
 // ── Convex polygon (hexagonal, pentagonal) ────────────────────────────────────
@@ -105,14 +99,8 @@ function pointInConvexPolygon(sx: number, sy: number, verts: Pt[]): boolean {
   return true;
 }
 
-function cellIntersectsConvexPolygon(px: number, py: number, verts: Pt[]): boolean {
-  return (
-    pointInConvexPolygon(px,       py,       verts) ||
-    pointInConvexPolygon(px + 1,   py,       verts) ||
-    pointInConvexPolygon(px,       py + 1,   verts) ||
-    pointInConvexPolygon(px + 1,   py + 1,   verts) ||
-    pointInConvexPolygon(px + 0.5, py + 0.5, verts)
-  );
+function cellCentreInConvexPolygon(px: number, py: number, verts: Pt[]): boolean {
+  return pointInConvexPolygon(px + 0.5, py + 0.5, verts);
 }
 
 function carveCircular(x: number, y: number, w: number, h: number): Set<string> {
@@ -122,7 +110,7 @@ function carveCircular(x: number, y: number, w: number, h: number): Set<string> 
   const r  = Math.min(w, h) / 2; // matches renderer: r = min(boundsW, boundsH) / 2 / cellSize
   for (let py = y; py < y + h; py++) {
     for (let px = x; px < x + w; px++) {
-      if (cellIntersectsCircle(px, py, cx, cy, r)) {
+      if (cellCentreInCircle(px, py, cx, cy, r)) {
         cells.add(`${px},${py}`);
       }
     }
@@ -149,7 +137,7 @@ function carveHexagonal(x: number, y: number, w: number, h: number): Set<string>
   ];
   for (let py = y; py < y + h; py++) {
     for (let px = x; px < x + w; px++) {
-      if (cellIntersectsConvexPolygon(px, py, verts)) {
+      if (cellCentreInConvexPolygon(px, py, verts)) {
         cells.add(`${px},${py}`);
       }
     }
@@ -161,18 +149,19 @@ function carveHexagonal(x: number, y: number, w: number, h: number): Set<string>
 function carvePentagonal(x: number, y: number, w: number, h: number): Set<string> {
   const cells = new Set<string>();
   const cx = x + w / 2;
-  const cy = y + h / 2;
-  // Matches renderer: r = min(boundsW / 1.902, boundsH / 1.809) in grid units
-  const r = Math.min(w / 1.902, h / 1.809);
+  // Matches renderer: r = min(boundsW / PENTAGON_W, boundsH / PENTAGON_H), seated by its
+  // own extents rather than its centroid so the apex stays inside the bounds.
+  const r = Math.min(w / PENTAGON_W, h / PENTAGON_H);
+  const seatedY = y + (h - PENTAGON_H * r) / 2 + r;
   // Regular pentagon, pointed top; vertices in CW order (screen coords, y-down)
   const verts: Pt[] = [];
   for (let i = 0; i < 5; i++) {
     const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
-    verts.push({ x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) });
+    verts.push({ x: cx + r * Math.cos(angle), y: seatedY + r * Math.sin(angle) });
   }
   for (let py = y; py < y + h; py++) {
     for (let px = x; px < x + w; px++) {
-      if (cellIntersectsConvexPolygon(px, py, verts)) {
+      if (cellCentreInConvexPolygon(px, py, verts)) {
         cells.add(`${px},${py}`);
       }
     }
@@ -280,7 +269,7 @@ function carveDiamond(x: number, y: number, w: number, h: number): Set<string> {
   const r  = Math.min(w, h) / 2; // matches renderer: r = min(boundsW, boundsH) / 2 / cellSize
   for (let py = y; py < y + h; py++) {
     for (let px = x; px < x + w; px++) {
-      if (cellIntersectsDiamond(px, py, cx, cy, r)) {
+      if (cellCentreInDiamond(px, py, cx, cy, r)) {
         cells.add(`${px},${py}`);
       }
     }

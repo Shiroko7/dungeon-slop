@@ -6,6 +6,8 @@ export interface ThemePalette {
   background: string;
   floor: string;
   wall: string;
+  /** Page background outside the walls — slightly darker than parchment. */
+  paper: string;
   corridor: string;
   door: string;
   secretDoor: string;

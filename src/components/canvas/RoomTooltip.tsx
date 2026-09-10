@@ -1,3 +1,4 @@
+import { roomName } from "../../engine/room-name.ts";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
 
 interface RoomTooltipProps {
@@ -17,7 +18,7 @@ export function RoomTooltip({ roomId, position }: RoomTooltipProps) {
   if (!room) return null;
 
   const description = roomDescriptions.get(roomId) ?? room.description;
-  const name = description?.name ?? `Room ${room.id}`;
+  const name = roomName(room, description);
   const brief = description?.description;
 
   return (

@@ -1,7 +1,9 @@
+import { roomName } from "../../engine/room-name.ts";
 import { useState, useCallback } from "react";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
 import { useUIStore } from "../../store/ui-store.ts";
 import { Button } from "../shared/Button.tsx";
+import { useConfirm } from "../shared/ConfirmDialog.tsx";
 import type { Room, RoomDescription, RoomEntry } from "../../engine/types.ts";
 
 function RoomListItem({
@@ -14,7 +16,7 @@ function RoomListItem({
   onSelect: (id: number) => void;
 }) {
   const desc = description ?? room.description;
-  const name = desc?.name ?? `Room ${room.id}`;
+  const name = roomName(room, desc);
   const isDescribed = !!desc;
   return (
     <button
@@ -77,8 +79,10 @@ function RoomDetail({
   onRegenerate: () => void;
 }) {
   const setRoomDescription = useDungeonStore((s) => s.setRoomDescription);
+  const clearRoomDescription = useDungeonStore((s) => s.clearRoomDescription);
+  const { ask, dialog } = useConfirm();
   const desc = description ?? room.description;
-  const name = desc?.name ?? `Room ${room.id}`;
+  const name = roomName(room, desc);
 
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<EditDraft>({
@@ -109,7 +113,7 @@ function RoomDetail({
   const saveEdit = useCallback(() => {
     const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
     const saved: RoomDescription = {
-      name: draft.name.trim() || `Room ${room.id}`,
+      name: draft.name.trim() || roomName(room),
       entries: desc?.entries,
       features: draft.features.trim() || undefined,
       monsters: lines(draft.monsters),
@@ -141,7 +145,7 @@ function RoomDetail({
               className="room-edit-input"
               value={draft.name}
               onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-              placeholder={`Room ${room.id}`}
+              placeholder={roomName(room)}
             />
           </label>
 
@@ -311,9 +315,29 @@ function RoomDetail({
         <p className="room-detail-empty">No description yet. Use Describe All or edit manually.</p>
       )}
 
-      <Button variant="secondary" size="sm" onClick={onRegenerate}>
-        Regenerate Description
-      </Button>
+      <div className="room-detail-actions">
+        <Button variant="secondary" size="sm" onClick={onRegenerate}>
+          Regenerate Description
+        </Button>
+        {desc && (
+          <button
+            className="room-detail-clear"
+            title="Clear this room's description"
+            onClick={() => {
+              void ask({
+                title: `Clear the description for "${name}"?`,
+                body: "The room stays on the map; only what was written about it is removed.",
+                confirmLabel: "Clear",
+              }).then((confirmed) => {
+                if (confirmed) void clearRoomDescription(room.id);
+              });
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {dialog}
     </div>
   );
 }

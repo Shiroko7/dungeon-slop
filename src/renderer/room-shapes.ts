@@ -1,5 +1,5 @@
 import type { Room } from "../engine/types.ts";
-import { CellType } from "../engine/types.ts";
+import { CellType, PENTAGON_W, PENTAGON_H } from "../engine/types.ts";
 import type { Cell } from "../engine/types.ts";
 
 export interface Point {
@@ -16,8 +16,9 @@ export interface RoomGeometry {
   radiusY?: number;
   // For polygon
   vertices?: Point[];
-  // For path (cross shape)
-  path?: Path2D;
+  // For path (cross shape): the bars whose union makes the shape. Kept as plain
+  // rects rather than a Path2D so describing a room needs no canvas.
+  rects?: Array<{ x: number; y: number; width: number; height: number }>;
   // Bounding box
   bounds: {
     x: number;
@@ -27,7 +28,51 @@ export interface RoomGeometry {
   };
 }
 
+/**
+ * The two bars of a Cross room, in whole grid cells.
+ *
+ * Shared with carveCross so the drawn shape lands on exactly the cells the room
+ * owns: centring the bars on the room's midpoint instead rounds differently for
+ * odd spans, leaving a half-cell of floor outside the outline.
+ */
+export function crossBars(room: Room): { hy: number; hh: number; vx: number; vw: number } {
+  const bar = Math.max(2, Math.floor(Math.min(room.width, room.height) / 3));
+  return {
+    hy: room.y + Math.floor((room.height - bar) / 2),
+    hh: bar,
+    vx: room.x + Math.floor((room.width - bar) / 2),
+    vw: bar,
+  };
+}
+
+/** The square carveSquare actually fills: the largest one centred in the bounds. */
+export function squareBounds(room: Room): { x: number; y: number; side: number } {
+  const side = Math.min(room.width, room.height);
+  return {
+    x: room.x + Math.floor((room.width - side) / 2),
+    y: room.y + Math.floor((room.height - side) / 2),
+    side,
+  };
+}
+
+// The same room's geometry is asked for over and over — every outline build,
+// hover overlay and shape test — so it is built once per room and cell size.
+const geometryCache = new WeakMap<Room, Map<number, RoomGeometry>>();
+
 export function getRoomGeometry(room: Room, cellSize: number): RoomGeometry {
+  let bySize = geometryCache.get(room);
+  if (bySize === undefined) {
+    bySize = new Map();
+    geometryCache.set(room, bySize);
+  }
+  const hit = bySize.get(cellSize);
+  if (hit !== undefined) return hit;
+  const built = buildRoomGeometry(room, cellSize);
+  bySize.set(cellSize, built);
+  return built;
+}
+
+function buildRoomGeometry(room: Room, cellSize: number): RoomGeometry {
   const boundsX = room.x * cellSize;
   const boundsY = room.y * cellSize;
   const boundsWidth = room.width * cellSize;
@@ -92,50 +137,65 @@ export function getRoomGeometry(room: Room, cellSize: number): RoomGeometry {
     }
 
     case "Pentagonal": {
-      // Pentagon with pointy top: natural ratio width ≈ 1.902r, height ≈ 1.809r
-      const r = Math.min(boundsWidth / 1.902, boundsHeight / 1.809);
-      const angleOffset = -Math.PI / 2; // Start at top
+      // Pentagon with pointy top; see PENTAGON_W/PENTAGON_H for the ratios.
+      // A pentagon's centroid is not the middle of its own bounding box, so it
+      // has to be seated by its extents — centring it on the room's midpoint
+      // instead pushes the apex a twentieth of the height out past the top edge,
+      // over whatever the layout put there.
+      const r = Math.min(boundsWidth / PENTAGON_W, boundsHeight / PENTAGON_H);
+      const seatedY = boundsY + (boundsHeight - PENTAGON_H * r) / 2 + r;
       const vertices: Point[] = [];
       for (let i = 0; i < 5; i++) {
-        const angle = angleOffset + (i * 2 * Math.PI) / 5;
+        const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 5; // start at the apex
         vertices.push({
           x: centerX + r * Math.cos(angle),
-          y: centerY + r * Math.sin(angle),
+          y: seatedY + r * Math.sin(angle),
         });
       }
       return {
         type: "polygon",
         centerX,
-        centerY,
+        centerY: seatedY,
         vertices,
         bounds,
       };
     }
 
     case "Cross": {
-      // Cross is union of horizontal and vertical bars — equal thickness for symmetry
-      const path = new Path2D();
-      const barThickness = Math.max(2, Math.floor(Math.min(room.width, room.height) / 3)) * cellSize;
-      const hBarHeight = barThickness;
-      const vBarWidth = barThickness;
-      const hBarY = centerY - hBarHeight / 2;
-      const vBarX = centerX - vBarWidth / 2;
-
-      // Horizontal bar
-      path.rect(boundsX, hBarY, boundsWidth, hBarHeight);
-      // Vertical bar
-      path.rect(vBarX, boundsY, vBarWidth, boundsHeight);
-
+      // Cross is the union of a horizontal and a vertical bar, snapped to the
+      // same cells carveCross fills.
+      const bars = crossBars(room);
       return {
         type: "path",
         centerX,
         centerY,
-        path,
+        rects: [
+          { x: boundsX, y: bars.hy * cellSize, width: boundsWidth, height: bars.hh * cellSize },
+          { x: bars.vx * cellSize, y: boundsY, width: bars.vw * cellSize, height: boundsHeight },
+        ],
         bounds,
       };
     }
 
-    case "Square":
+    case "Square": {
+      // carveSquare fills the largest square centred in the bounds, not the
+      // bounds themselves — draw that, or an oblong room shows floor it has not
+      // got along two of its edges.
+      const sq = squareBounds(room);
+      const sqBounds = {
+        x: sq.x * cellSize,
+        y: sq.y * cellSize,
+        width: sq.side * cellSize,
+        height: sq.side * cellSize,
+      };
+      return {
+        type: "rect",
+        centerX: sqBounds.x + sqBounds.width / 2,
+        centerY: sqBounds.y + sqBounds.height / 2,
+        bounds: sqBounds,
+      };
+    }
+
     case "Rectangular":
     default:
       return {
@@ -176,9 +236,7 @@ export function createRoomPath(geometry: RoomGeometry): Path2D {
       break;
 
     case "path":
-      if (geometry.path) {
-        return geometry.path;
-      }
+      for (const r of geometry.rects ?? []) path.rect(r.x, r.y, r.width, r.height);
       break;
 
     case "rect":
@@ -196,6 +254,53 @@ export function createRoomPath(geometry: RoomGeometry): Path2D {
 
 export function isShapedRoom(shape: string): boolean {
   return ["Circular", "Diamond", "Hexagonal", "Pentagonal"].includes(shape);
+}
+
+/**
+ * Is a point inside the room as the map actually draws it?
+ *
+ * Not the same question as which cells the room owns. Shape carving keeps every
+ * cell the shape so much as clips, so a circular or hexagonal room owns a ring
+ * of cells lying outside the outline it is drawn with. Anything reasoning about
+ * what the reader can see — where the paper starts, where a mark may go — has
+ * to ask the geometry, not the grid.
+ *
+ * Coordinates are in the same units as `cellSize` (pass 1 to work in grid space).
+ */
+export function pointInRoomShape(room: Room, px: number, py: number, cellSize: number): boolean {
+  const geo = getRoomGeometry(room, cellSize);
+  const { x, y, width: w, height: h } = geo.bounds;
+  if (px < x || px > x + w || py < y || py > y + h) return false;
+
+  switch (geo.type) {
+    case "ellipse": {
+      const rx = geo.radiusX ?? 0;
+      const ry = geo.radiusY ?? 0;
+      if (rx <= 0 || ry <= 0) return false;
+      const dx = (px - geo.centerX) / rx;
+      const dy = (py - geo.centerY) / ry;
+      return dx * dx + dy * dy <= 1;
+    }
+    case "polygon": {
+      // Every polygon shape here is convex and wound clockwise in screen space.
+      const verts = geo.vertices ?? [];
+      if (verts.length < 3) return false;
+      for (let i = 0; i < verts.length; i++) {
+        const a = verts[i]!;
+        const b = verts[(i + 1) % verts.length]!;
+        if ((b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x) < 0) return false;
+      }
+      return true;
+    }
+    case "path":
+      // Cross: the union of a horizontal and a vertical bar.
+      return (geo.rects ?? []).some(
+        (r) => px >= r.x && px <= r.x + r.width && py >= r.y && py <= r.y + r.height,
+      );
+    case "rect":
+    default:
+      return true; // already inside the bounds
+  }
 }
 
 export interface CorridorEntry {
@@ -272,14 +377,12 @@ export function crossOutlineVertices(
   const boundsY = room.y * cellSize;
   const boundsWidth = room.width * cellSize;
   const boundsHeight = room.height * cellSize;
-  const centerX = boundsX + boundsWidth / 2;
-  const centerY = boundsY + boundsHeight / 2;
 
-  const barThickness = Math.max(2, Math.floor(Math.min(room.width, room.height) / 3)) * cellSize;
-  const hH = barThickness;
-  const vW = barThickness;
-  const hY = centerY - hH / 2;
-  const vX = centerX - vW / 2;
+  const bars = crossBars(room);
+  const hH = bars.hh * cellSize;
+  const vW = bars.vw * cellSize;
+  const hY = bars.hy * cellSize;
+  const vX = bars.vx * cellSize;
   const bR = boundsX + boundsWidth;
   const bB = boundsY + boundsHeight;
 

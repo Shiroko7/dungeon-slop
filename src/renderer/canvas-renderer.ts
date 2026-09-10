@@ -1,10 +1,17 @@
 import rough from "roughjs";
 import type { RoughCanvas } from "roughjs/bin/canvas";
 import type { Dungeon, Cell } from "../engine/types.ts";
-import { CellType, FeatureType } from "../engine/types.ts";
+import { CellType, FeatureType, isCaveShape } from "../engine/types.ts";
 import type { ThemePalette } from "./themes/theme-engine.ts";
 import { getRoomGeometry, createRoomPath } from "./room-shapes.ts";
 import { drawDoorSymbols } from "./door-symbols.ts";
+import {
+  drawSketchWalls,
+  drawTrapGlyph,
+  drawTreasureGlyph,
+  extendsIntoRoom,
+  roughSeed,
+} from "./sketch.ts";
 
 export interface RenderOptions {
   cellSize: number;
@@ -21,8 +28,6 @@ export interface StaticLayerOptions {
   theme: ThemePalette;
   showGrid: boolean;
   hiddenFeatureTypes?: ReadonlySet<FeatureType>;
-  /** Ink color for door symbols; defaults to theme.ink. */
-  doorInk?: string;
   includeRoomLabels?: boolean;
 }
 
@@ -32,9 +37,9 @@ const WALKABLE = new Set([CellType.Floor, CellType.Corridor, CellType.Door, Cell
 //
 // All rooms (except Cave) are rendered as smooth geometric Path2D shapes.
 // Cave room cells and all corridor/walkable cells are rendered as individual
-// cellSize×cellSize rectangles.  Corridor rects adjacent to a geometric room
-// are over-extended by one cellSize toward the room so they always penetrate
-// into the smooth shape boundary and connect seamlessly.
+// cellSize×cellSize rectangles.  A corridor rect that arrives head-on at a
+// geometric room is over-extended by one cellSize toward it so the two always
+// meet across the smooth shape boundary.
 //
 // Render passes:
 //   Pass 1 — thick stroke  (2× wall thickness): draws wall outline everywhere
@@ -69,16 +74,17 @@ function buildFloorPath(dungeon: Dungeon, cellSize: number): Path2D {
   // All non-Cave rooms get a smooth geometric path (rect, ellipse, or polygon).
   const geometricRoomIds = new Set<number>();
   for (const room of rooms) {
-    if (room.shape === "Cave") continue;
+    if (isCaveShape(room.shape)) continue;
     geometricRoomIds.add(room.id);
     path.addPath(createRoomPath(getRoomGeometry(room, cellSize)));
   }
 
   // Every walkable cell not covered by a geometric room is added as a
-  // cellSize×cellSize rect.  Where that cell borders a geometric room, extend
-  // the rect by one extra cellSize in that direction so the corridor visually
-  // penetrates the smooth room boundary (the fill in Pass 2 will erase any
-  // over-extension that lands inside the room).
+  // cellSize×cellSize rect.  Where a passage arrives head-on at a geometric
+  // room, extend the rect by one extra cellSize in that direction so it
+  // penetrates the smooth room boundary (the fill in Pass 2 erases the part
+  // that lands inside the room).  A corridor that merely runs alongside a room
+  // must not extend — see extendsIntoRoom.
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const cell = grid[y]?.[x];
@@ -93,49 +99,16 @@ function buildFloorPath(dungeon: Dungeon, cellSize: number): Path2D {
       const sRid = grid[y + 1]?.[x]?.roomId ?? null;
       const wRid = grid[y]?.[x - 1]?.roomId ?? null;
       const eRid = grid[y]?.[x + 1]?.roomId ?? null;
-      if (nRid !== null && geometricRoomIds.has(nRid)) minY -= cellSize;
-      if (sRid !== null && geometricRoomIds.has(sRid)) maxY += cellSize;
-      if (wRid !== null && geometricRoomIds.has(wRid)) minX -= cellSize;
-      if (eRid !== null && geometricRoomIds.has(eRid)) maxX += cellSize;
+      if (nRid !== null && geometricRoomIds.has(nRid) && extendsIntoRoom(grid, x, y, 0, -1, nRid)) minY -= cellSize;
+      if (sRid !== null && geometricRoomIds.has(sRid) && extendsIntoRoom(grid, x, y, 0, 1, sRid)) maxY += cellSize;
+      if (wRid !== null && geometricRoomIds.has(wRid) && extendsIntoRoom(grid, x, y, -1, 0, wRid)) minX -= cellSize;
+      if (eRid !== null && geometricRoomIds.has(eRid) && extendsIntoRoom(grid, x, y, 1, 0, eRid)) maxX += cellSize;
 
       path.rect(minX, minY, maxX - minX, maxY - minY);
     }
   }
 
   return path;
-}
-
-export function renderFloorPlan(
-  ctx: CanvasRenderingContext2D,
-  dungeon: Dungeon,
-  cellSize: number,
-  theme: ThemePalette,
-  showGrid = false,
-): void {
-  const floorPath = getCachedFloorPath(dungeon, cellSize);
-  const wallThickness = Math.max(1.5, cellSize * WALL_THICKNESS_FRACTION);
-
-  // Pass 1: Thick stroke — wall outline at 2× the desired final thickness.
-  // The inner half will be painted over by the floor fill in Pass 2.
-  ctx.strokeStyle = theme.ink;
-  ctx.lineWidth = wallThickness * 2;
-  ctx.lineCap = "square";
-  ctx.lineJoin = "miter";
-  ctx.stroke(floorPath);
-
-  // Pass 2: Parchment fill — erases the interior half of every stroke and
-  // covers all corridor over-extensions / shape overlaps inside rooms, leaving
-  // a clean outer wall perimeter and seamless corridor connections.
-  ctx.fillStyle = theme.parchment;
-  ctx.fill(floorPath, "nonzero");
-
-  // Pass 3: Grid dots, clipped to the floor area so they only appear on floor.
-  if (showGrid) {
-    ctx.save();
-    ctx.clip(floorPath, "nonzero");
-    drawGridDots(ctx, dungeon.width, dungeon.height, cellSize, theme);
-    ctx.restore();
-  }
 }
 
 /**
@@ -152,19 +125,32 @@ export function renderStaticLayers(
 ): void {
   const {
     cellSize, theme, showGrid, hiddenFeatureTypes,
-    doorInk = theme.ink,
     includeRoomLabels = true,
   } = opts;
 
-  ctx.fillStyle = theme.wall;
+  const floorPath = getCachedFloorPath(dungeon, cellSize);
+
+  // 1. Paper background
+  ctx.fillStyle = theme.paper;
   ctx.fillRect(0, 0, dungeon.width * cellSize, dungeon.height * cellSize);
 
-  renderFloorPlan(ctx, dungeon, cellSize, theme, showGrid);
+  // 3. Walls: a heavy ink band, the parchment floor over it, the shaded inner face
+  drawSketchWalls(ctx, dungeon, cellSize, theme, floorPath);
 
+  // 7. Grid dots, clipped to the floor
+  if (showGrid) {
+    ctx.save();
+    ctx.clip(floorPath, "nonzero");
+    drawGridDots(ctx, dungeon.width, dungeon.height, cellSize, theme);
+    ctx.restore();
+  }
+
+  // 9. Stairs + feature glyphs, door symbols
   const rc = rough.canvas(ctx.canvas as HTMLCanvasElement);
   drawSpecialCells(rc, ctx, dungeon, cellSize, theme, hiddenFeatureTypes);
-  drawDoorSymbols(ctx, dungeon, cellSize, doorInk, hiddenFeatureTypes);
+  drawDoorSymbols(ctx, dungeon, cellSize, theme.ink, hiddenFeatureTypes);
 
+  // 10. Room labels
   if (includeRoomLabels) {
     drawRoomLabels(ctx, dungeon, cellSize, theme);
   }
@@ -186,210 +172,6 @@ export function renderDungeon(
   if (hoveredRoomId !== null && hoveredRoomId !== selectedRoomId) {
     drawRoomOverlay(ctx, dungeon, hoveredRoomId, cellSize, theme.roomHover);
   }
-}
-
-function isWalkable(cell: Cell | undefined): boolean {
-  return cell !== undefined && WALKABLE.has(cell.type);
-}
-
-function shadowVertexDepth(saltedSeed: number, vx: number, vy: number, base: number): number {
-  let h = (saltedSeed ^ (vx * 374761393) ^ (vy * 1779033703)) >>> 0;
-  h = (Math.imul(h ^ (h >>> 13), 2246822519)) >>> 0;
-  h = (Math.imul(h ^ (h >>> 16), 1013904223)) >>> 0;
-  return base * (0.85 + (h / 0xffffffff) * 0.3);
-}
-
-export function drawWallShadows(
-  ctx: CanvasRenderingContext2D,
-  dungeon: Dungeon,
-  cellSize: number,
-): void {
-  const { width, height, grid } = dungeon;
-  const base = Math.max(4, cellSize * 0.40);
-  const nSeed = dungeon.seed ^ 0x4a9b3d1f;
-  const wSeed = dungeon.seed ^ 0x7c3e9a2b;
-
-  // All shadow geometry is drawn at full opacity onto an offscreen canvas,
-  // then composited once at a fixed alpha. This prevents overlap darkening
-  // where the N-shadow and W-shadow meet at concave (NW inner) corners.
-  const offscreen = document.createElement("canvas");
-  offscreen.width  = width  * cellSize;
-  offscreen.height = height * cellSize;
-  const off = offscreen.getContext("2d");
-  if (!off) return;
-
-  off.fillStyle = "#000";
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const cell = grid[y]?.[x];
-      if (!cell || !WALKABLE.has(cell.type)) continue;
-
-      const px = x * cellSize;
-      const py = y * cellSize;
-
-      const wallN = y > 0 && !isWalkable(grid[y - 1]?.[x]);
-      const wallW = x > 0 && !isWalkable(grid[y]?.[x - 1]);
-
-      if (wallN) {
-        const ld = shadowVertexDepth(nSeed, x,     y, base);
-        const rd = shadowVertexDepth(nSeed, x + 1, y, base);
-        off.beginPath();
-        off.moveTo(px,            py);
-        off.lineTo(px + cellSize, py);
-        off.lineTo(px + cellSize, py + rd);
-        off.lineTo(px,            py + ld);
-        off.closePath();
-        off.fill();
-      }
-
-      if (wallW) {
-        const td = shadowVertexDepth(wSeed, x, y,     base);
-        const bd = shadowVertexDepth(wSeed, x, y + 1, base);
-        const topClip = wallN ? shadowVertexDepth(nSeed, x, y, base) : 0;
-        const frac    = topClip / cellSize;
-        const wAtClip = td + (bd - td) * frac;
-        off.beginPath();
-        off.moveTo(px,           py + topClip);
-        off.lineTo(px + wAtClip, py + topClip);
-        off.lineTo(px + bd,      py + cellSize);
-        off.lineTo(px,           py + cellSize);
-        off.closePath();
-        off.fill();
-      }
-
-      // 270° concave corner fill — seam between N and W shadows
-      if (y > 0 && x > 0
-          && isWalkable(grid[y - 1]?.[x])
-          && isWalkable(grid[y]?.[x - 1])
-          && !isWalkable(grid[y - 1]?.[x - 1])) {
-        const nd = shadowVertexDepth(nSeed, x, y, base);
-        const wd = shadowVertexDepth(wSeed, x, y, base);
-        off.fillRect(px, py, wd, nd);
-      }
-    }
-  }
-
-  ctx.save();
-  ctx.globalAlpha = 0.30;
-  ctx.drawImage(offscreen, 0, 0);
-  ctx.restore();
-}
-
-export function drawOutwardShadows(
-  ctx: CanvasRenderingContext2D,
-  dungeon: Dungeon,
-  cellSize: number,
-): void {
-  const { width, height, grid } = dungeon;
-  const base = Math.max(6, cellSize * 0.62);
-  // N/W seeds match drawWallShadows so vertex depths align at the floor boundary
-  const nSeed = dungeon.seed ^ 0x4a9b3d1f;
-  const sSeed = dungeon.seed ^ 0x9f2c7e8d;
-  const wSeed = dungeon.seed ^ 0x7c3e9a2b;
-  const eSeed = dungeon.seed ^ 0x3b5f1d9c;
-
-  // Paint all shapes onto an offscreen canvas at full opacity then composite
-  // once at a low alpha — this eliminates overlap darkening at seams and corners.
-  const offscreen = document.createElement("canvas");
-  offscreen.width = width * cellSize;
-  offscreen.height = height * cellSize;
-  const off = offscreen.getContext("2d");
-  if (!off) return;
-
-  off.fillStyle = "#000";
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const cell = grid[y]?.[x];
-      if (!cell || !WALKABLE.has(cell.type)) continue;
-
-      const px = x * cellSize;
-      const py = y * cellSize;
-
-      const wallN = y > 0           && !isWalkable(grid[y - 1]?.[x]);
-      const wallS = y < height - 1  && !isWalkable(grid[y + 1]?.[x]);
-      const wallW = x > 0           && !isWalkable(grid[y]?.[x - 1]);
-      const wallE = x < width  - 1  && !isWalkable(grid[y]?.[x + 1]);
-
-      if (wallN) {
-        const ld = shadowVertexDepth(nSeed, x,     y, base);
-        const rd = shadowVertexDepth(nSeed, x + 1, y, base);
-        off.beginPath();
-        off.moveTo(px,            py);
-        off.lineTo(px + cellSize, py);
-        off.lineTo(px + cellSize, py - rd);
-        off.lineTo(px,            py - ld);
-        off.closePath();
-        off.fill();
-      }
-
-      if (wallS) {
-        const ld = shadowVertexDepth(sSeed, x,     y + 1, base);
-        const rd = shadowVertexDepth(sSeed, x + 1, y + 1, base);
-        off.beginPath();
-        off.moveTo(px,            py + cellSize);
-        off.lineTo(px + cellSize, py + cellSize);
-        off.lineTo(px + cellSize, py + cellSize + rd);
-        off.lineTo(px,            py + cellSize + ld);
-        off.closePath();
-        off.fill();
-      }
-
-      if (wallW) {
-        const td = shadowVertexDepth(wSeed, x, y,     base);
-        const bd = shadowVertexDepth(wSeed, x, y + 1, base);
-        off.beginPath();
-        off.moveTo(px,      py);
-        off.lineTo(px - td, py);
-        off.lineTo(px - bd, py + cellSize);
-        off.lineTo(px,      py + cellSize);
-        off.closePath();
-        off.fill();
-      }
-
-      if (wallE) {
-        const td = shadowVertexDepth(eSeed, x + 1, y,     base);
-        const bd = shadowVertexDepth(eSeed, x + 1, y + 1, base);
-        off.beginPath();
-        off.moveTo(px + cellSize,      py);
-        off.lineTo(px + cellSize + td, py);
-        off.lineTo(px + cellSize + bd, py + cellSize);
-        off.lineTo(px + cellSize,      py + cellSize);
-        off.closePath();
-        off.fill();
-      }
-
-      // Corner accents — fill the gap in each diagonal wall cell left by adjacent
-      // cardinal shadows. Safe to overlap here since we're on the offscreen canvas.
-      if (x > 0 && y > 0 && !isWalkable(grid[y - 1]?.[x - 1])) {
-        const wd = shadowVertexDepth(wSeed, x, y, base);
-        const nd = shadowVertexDepth(nSeed, x, y, base);
-        off.fillRect(px - wd, py - nd, wd, nd);
-      }
-      if (x < width - 1 && y > 0 && !isWalkable(grid[y - 1]?.[x + 1])) {
-        const ed = shadowVertexDepth(eSeed, x + 1, y, base);
-        const nd = shadowVertexDepth(nSeed, x + 1, y, base);
-        off.fillRect(px + cellSize, py - nd, ed, nd);
-      }
-      if (x > 0 && y < height - 1 && !isWalkable(grid[y + 1]?.[x - 1])) {
-        const wd = shadowVertexDepth(wSeed, x,     y + 1, base);
-        const sd = shadowVertexDepth(sSeed, x,     y + 1, base);
-        off.fillRect(px - wd, py + cellSize, wd, sd);
-      }
-      if (x < width - 1 && y < height - 1 && !isWalkable(grid[y + 1]?.[x + 1])) {
-        const ed = shadowVertexDepth(eSeed, x + 1, y + 1, base);
-        const sd = shadowVertexDepth(sSeed, x + 1, y + 1, base);
-        off.fillRect(px + cellSize, py + cellSize, ed, sd);
-      }
-    }
-  }
-
-  // Single composite pass — all overlap was already absorbed into opaque black
-  ctx.save();
-  ctx.globalAlpha = 0.20;
-  ctx.drawImage(offscreen, 0, 0);
-  ctx.restore();
 }
 
 export function drawSpecialCells(
@@ -416,27 +198,21 @@ export function drawSpecialCells(
 
       switch (cell.type) {
         case CellType.StairsUp:
-          if (!hidden.has(FeatureType.StairsUp)) drawStairs(rc, px, py, cellSize, theme, true);
+          if (!hidden.has(FeatureType.StairsUp)) drawStairs(rc, px, py, cellSize, theme, true, roughSeed(dungeon.seed, x, y));
           break;
         case CellType.StairsDown:
-          if (!hidden.has(FeatureType.StairsDown)) drawStairs(rc, px, py, cellSize, theme, false);
+          if (!hidden.has(FeatureType.StairsDown)) drawStairs(rc, px, py, cellSize, theme, false, roughSeed(dungeon.seed, x, y));
           break;
       }
     }
   }
 
-  // Trap and Treasure sit on Floor cells — iterate features directly
-  const fontSize = Math.max(8, cellSize * 0.6);
-  ctx.font = `${fontSize}px serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
+  // Trap and Treasure sit on Floor cells — hand-drawn seeded glyphs
   for (const feature of dungeon.features) {
     if (feature.type === FeatureType.Trap && !hidden.has(FeatureType.Trap)) {
-      ctx.fillStyle = theme.trap;
-      ctx.fillText("\u26A0", feature.x * cellSize + cellSize / 2, feature.y * cellSize + cellSize / 2);
+      drawTrapGlyph(rc, ctx, feature.x, feature.y, cellSize, theme, dungeon.seed);
     } else if (feature.type === FeatureType.Treasure && !hidden.has(FeatureType.Treasure)) {
-      ctx.fillStyle = theme.treasure;
-      ctx.fillText("$", feature.x * cellSize + cellSize / 2, feature.y * cellSize + cellSize / 2);
+      drawTreasureGlyph(rc, ctx, feature.x, feature.y, cellSize, theme, dungeon.seed);
     }
   }
 }
@@ -447,7 +223,8 @@ function drawStairs(
   py: number,
   cellSize: number,
   theme: ThemePalette,
-  isUp: boolean
+  isUp: boolean,
+  seed: number,
 ): void {
   const steps = 4;
   const stepHeight = cellSize / steps;
@@ -463,9 +240,10 @@ function drawStairs(
     if (stepWidth > 0 && stepH > 0) {
       rc.rectangle(px + margin, stepY, stepWidth, stepH, {
         stroke: theme.ink,
-        strokeWidth: 1,
+        strokeWidth: Math.max(1, cellSize * 0.05),
         roughness: 0.5,
         fill: "none",
+        seed: seed + i,
       });
     }
   }
@@ -482,14 +260,16 @@ function getGridDotsPath(width: number, height: number, cellSize: number): Path2
   const cached = gridDotsPathCache.get(key);
   if (cached) return cached;
 
+  // Dot radius scales with cellSize so all export scales read the same
+  const r = Math.max(0.75, cellSize * 0.05);
   const path = new Path2D();
   for (let x = 0; x <= width; x++) {
     for (let y = 0; y <= height; y++) {
       const px = x * cellSize;
       const py = y * cellSize;
       // moveTo start of arc to avoid implicit lineTo connectors between dots.
-      path.moveTo(px + 1, py);
-      path.arc(px, py, 1, 0, Math.PI * 2);
+      path.moveTo(px + r, py);
+      path.arc(px, py, r, 0, Math.PI * 2);
     }
   }
   gridDotsPathCache.set(key, path);
@@ -519,8 +299,9 @@ function drawRoomLabels(
   ctx.fillStyle = theme.text;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const fontSize = Math.max(8, Math.min(cellSize * 0.6, 14));
-  ctx.font = `${fontSize}px sans-serif`;
+  // Hand-lettered map labels; size scales with cellSize for export parity
+  const fontSize = Math.max(9, cellSize * 0.72);
+  ctx.font = `${fontSize}px 'Patrick Hand', 'Segoe Print', cursive`;
 
   for (const room of dungeon.rooms) {
     const cx = (room.centerX + 0.5) * cellSize;
@@ -541,7 +322,7 @@ function drawRoomOverlay(
 
   ctx.fillStyle = color;
 
-  if (room.shape !== "Cave") {
+  if (!isCaveShape(room.shape)) {
     // All non-Cave rooms have a smooth geometric path (rect, ellipse, polygon, cross)
     ctx.fill(createRoomPath(getRoomGeometry(room, cellSize)));
   } else {
@@ -559,34 +340,6 @@ function drawRoomOverlay(
       }
     }
   }
-}
-
-export function getCellAtPixel(
-  px: number,
-  py: number,
-  cellSize: number,
-  panX: number,
-  panY: number,
-  zoom: number
-): { x: number; y: number } {
-  const x = Math.floor((px - panX) / (cellSize * zoom));
-  const y = Math.floor((py - panY) / (cellSize * zoom));
-  return { x, y };
-}
-
-export function getRoomAtCell(
-  dungeon: Dungeon,
-  x: number,
-  y: number
-): number | null {
-  if (x < 0 || y < 0 || x >= dungeon.width || y >= dungeon.height) {
-    return null;
-  }
-  const row = dungeon.grid[y];
-  if (!row) return null;
-  const cell = row[x];
-  if (!cell) return null;
-  return cell.roomId;
 }
 
 // ─── OffscreenCanvas buffer ───────────────────────────────────────────────────
@@ -616,11 +369,3 @@ export function buildDungeonBuffer(
   return buf;
 }
 
-/**
- * Invalidate the cached floor Path2D for a dungeon.
- * Must be called after any in-place mutation of dungeon.grid so that the next
- * renderFloorPlan() call rebuilds the path rather than using the stale cached one.
- */
-export function invalidateFloorPathCache(dungeon: Dungeon): void {
-  floorPathCache.delete(dungeon);
-}
