@@ -7,7 +7,26 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Patrick+Hand&display=swap" rel="stylesheet" />
+  <script>
+    // Set the theme before first paint. React applies it too, but only after
+    // hydration — without this the page paints light first and flashes.
+    // Reads the same persisted store the app writes, and falls back to the
+    // dark default when nothing is stored yet.
+    (function () {
+      var dark = true;
+      try {
+        var saved = localStorage.getItem('dungeon-slop-ui');
+        if (saved) {
+          var state = JSON.parse(saved).state;
+          if (state && typeof state.darkMode === 'boolean') dark = state.darkMode;
+        }
+      } catch (e) {
+        // Private mode, blocked storage, corrupt JSON — keep the default.
+      }
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    })();
+  </script>
 </head>
 <body>
   <div id="root"></div>
