@@ -79,6 +79,7 @@ function RoomDetail({
 }) {
   const setRoomDescription = useDungeonStore((s) => s.setRoomDescription);
   const clearRoomDescription = useDungeonStore((s) => s.clearRoomDescription);
+  const editStatus = useDungeonStore((s) => s.dungeon?.editStatus);
   const restoreRevision = useDungeonStore((s) => s.restoreRevision);
   const dungeonId = useDungeonStore((s) => s.dungeonId);
   const { ask, dialog } = useConfirm();
@@ -140,6 +141,12 @@ function RoomDetail({
           </Button>
           <h3 className="room-detail-name">Edit Room</h3>
         </div>
+
+        {editStatus?.narrativeStale && (
+          <p className="room-detail-warning">
+            The map changed after this description was written. Review it before saving.
+          </p>
+        )}
 
         <div className="room-edit-form">
           <label className="room-edit-label">
@@ -250,6 +257,12 @@ function RoomDetail({
           ✎
         </Button>
       </div>
+
+      {editStatus?.narrativeStale && (
+        <p className="room-detail-warning">
+          The map changed after this description was written. Review it before publishing.
+        </p>
+      )}
 
       {desc ? (
         <>
