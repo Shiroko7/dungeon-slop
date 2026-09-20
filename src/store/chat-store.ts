@@ -20,8 +20,11 @@ interface ChatState {
   openArchitect: (dungeonId: number) => Promise<ChatRecord | null>;
   close: () => void;
 
-  send: (content: string) => Promise<void>;
-  recordAssistant: (content: string, citations?: Citation[] | null) => Promise<void>;
+  send: (content: string) => Promise<boolean>;
+  recordAssistant: (
+    content: string,
+    citations?: Citation[] | null,
+  ) => Promise<void>;
   truncateFrom: (index: number) => Promise<void>;
 
   setStreaming: (value: boolean) => void;
@@ -35,6 +38,10 @@ function message(err: unknown, fallback: string): string {
 
 /** Optimistic placeholder id — replaced when the server answers. */
 let localId = -1;
+let chatEpoch = 0;
+export function chatVersion() {
+  return chatEpoch;
+}
 
 export const useChatStore = create<ChatState>()((set, get) => ({
   chat: null,
@@ -47,31 +54,47 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   setStreamingText: (streamingText) => set({ streamingText }),
   setError: (error) => set({ error }),
 
-  close: () => set({ chat: null, streamingText: "", isStreaming: false, error: null }),
+  close: () => {
+    ++chatEpoch;
+    set({
+      chat: null,
+      isLoading: false,
+      streamingText: "",
+      isStreaming: false,
+      error: null,
+    });
+  },
 
   openChat: async (id) => {
-    if (get().chat?.id === id) return;
-    set({ isLoading: true, chat: null, streamingText: "" });
+    const epoch = ++chatEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === chatEpoch) set(partial);
+    };
+    update({ isLoading: true, chat: null, streamingText: "" });
     try {
-      set({ chat: await api.chats.get(id), error: null });
+      update({ chat: await api.chats.get(id), error: null });
     } catch (err) {
-      set({ error: message(err, "Could not open that thread") });
+      update({ error: message(err, "Could not open that thread") });
     } finally {
-      set({ isLoading: false });
+      update({ isLoading: false });
     }
   },
 
   openArchitect: async (dungeonId) => {
-    set({ isLoading: true, streamingText: "" });
+    const epoch = ++chatEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === chatEpoch) set(partial);
+    };
+    update({ isLoading: true, chat: null, streamingText: "" });
     try {
       const chat = await api.dungeons.architectChat(dungeonId);
-      set({ chat, error: null });
-      return chat;
+      update({ chat, error: null });
+      return epoch === chatEpoch ? chat : null;
     } catch (err) {
-      set({ error: message(err, "Could not open the build log") });
+      update({ error: message(err, "Could not open the build log") });
       return null;
     } finally {
-      set({ isLoading: false });
+      update({ isLoading: false });
     }
   },
 
@@ -81,8 +104,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
    * available for a later truncate.
    */
   send: async (content) => {
+    const epoch = chatEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === chatEpoch) set(partial);
+    };
     const chat = get().chat;
-    if (chat === null) return;
+    if (chat === null) return false;
 
     const optimistic: ChatMessage = {
       id: localId--,
@@ -91,49 +118,72 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       citations: null,
       createdAt: Date.now(),
     };
-    set({ chat: { ...chat, messages: [...chat.messages, optimistic] } });
+    update({ chat: { ...chat, messages: [...chat.messages, optimistic] } });
 
     try {
       const saved = await api.chats.append(chat.id, { role: "user", content });
-      set((state) =>
+      update((state) =>
         state.chat === null
           ? {}
           : {
               chat: {
                 ...state.chat,
-                messages: state.chat.messages.map((m) => (m.id === optimistic.id ? saved : m)),
+                messages: state.chat.messages.map((m) =>
+                  m.id === optimistic.id ? saved : m,
+                ),
               },
             },
       );
     } catch (err) {
-      set({ error: message(err, "Could not save that message") });
+      update({ error: message(err, "Could not save that message") });
+      return false;
     }
+    return epoch === chatEpoch;
   },
 
   recordAssistant: async (content, citations = null) => {
+    const epoch = chatEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === chatEpoch) set(partial);
+    };
     const chat = get().chat;
     if (chat === null) return;
     try {
-      const saved = await api.chats.append(chat.id, { role: "assistant", content, citations });
-      set((state) =>
-        state.chat === null ? {} : { chat: { ...state.chat, messages: [...state.chat.messages, saved] } },
+      const saved = await api.chats.append(chat.id, {
+        role: "assistant",
+        content,
+        citations,
+      });
+      update((state) =>
+        state.chat === null
+          ? {}
+          : {
+              chat: {
+                ...state.chat,
+                messages: [...state.chat.messages, saved],
+              },
+            },
       );
     } catch (err) {
-      set({ error: message(err, "Could not save the reply") });
+      update({ error: message(err, "Could not save the reply") });
     } finally {
-      set({ streamingText: "" });
+      update({ streamingText: "" });
     }
   },
 
   /** Edit-and-resend: drop this message and everything after it. */
   truncateFrom: async (index) => {
+    const epoch = ++chatEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === chatEpoch) set(partial);
+    };
     const chat = get().chat;
     if (chat === null) return;
     try {
       const messages = await api.chats.truncate(chat.id, index);
-      set({ chat: { ...chat, messages }, error: null });
+      update({ chat: { ...chat, messages }, error: null });
     } catch (err) {
-      set({ error: message(err, "Could not edit that message") });
+      update({ error: message(err, "Could not edit that message") });
     }
   },
 }));

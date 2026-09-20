@@ -25,11 +25,15 @@ interface NotesState {
   uploadFiles: (campaignId: number, files: File[]) => Promise<void>;
   removeDocument: (id: number) => Promise<void>;
   setError: (error: string | null) => void;
+  close: () => void;
 }
 
 function message(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
+
+let notesEpoch = 0;
+let viewEpoch = 0;
 
 export const useNotesStore = create<NotesState>()((set, get) => ({
   campaignId: null,
@@ -41,32 +45,63 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
   error: null,
 
   setError: (error) => set({ error }),
+  close: () => {
+    ++viewEpoch;
+    ++notesEpoch;
+    set({
+      campaignId: null,
+      documents: [],
+      isLoading: false,
+      isUploading: false,
+      uploadLog: [],
+      summaryProgress: null,
+      error: null,
+    });
+  },
 
   fetchDocuments: async (campaignId) => {
     // Drop the previous campaign's list immediately. Showing one campaign's
     // notes under another's name, even for a frame, is worse than showing none.
     if (get().campaignId !== campaignId) {
-      set({ campaignId, documents: [], uploadLog: [] });
+      ++viewEpoch;
+      set({
+        campaignId,
+        documents: [],
+        uploadLog: [],
+        isUploading: false,
+        summaryProgress: null,
+      });
     }
-    set({ isLoading: true });
+    const epoch = ++notesEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === notesEpoch) set(partial);
+    };
+    update({ isLoading: true });
     try {
-      set({ documents: await api.notes.list(campaignId), error: null });
+      update({ documents: await api.notes.list(campaignId), error: null });
     } catch (err) {
-      set({ error: message(err, "Could not load notes") });
+      update({ error: message(err, "Could not load notes") });
     } finally {
-      set({ isLoading: false });
+      update({ isLoading: false });
     }
   },
 
   uploadFiles: async (campaignId, files) => {
+    const epoch = viewEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === viewEpoch) set(partial);
+    };
     if (files.length === 0 || get().isUploading) return;
 
-    set({
+    update({
       campaignId,
       isUploading: true,
       error: null,
       summaryProgress: null,
-      uploadLog: files.map((f) => ({ filename: f.name, status: "pending" as const })),
+      uploadLog: files.map((f) => ({
+        filename: f.name,
+        status: "pending" as const,
+      })),
     });
 
     const form = new FormData();
@@ -78,8 +113,12 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
         body: form,
       });
       if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? `Server responded with ${response.status}`);
+        const body = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(
+          body?.error ?? `Server responded with ${response.status}`,
+        );
       }
 
       const reader = response.body?.getReader();
@@ -109,13 +148,14 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
           switch (event["type"]) {
             case "file": {
               const index = event["index"] as number;
-              set((state) => {
+              update((state) => {
                 const log = [...state.uploadLog];
                 const existing = log[index];
                 if (existing !== undefined) {
                   log[index] = {
                     ...existing,
-                    status: event["status"] === "indexed" ? "indexed" : "failed",
+                    status:
+                      event["status"] === "indexed" ? "indexed" : "failed",
                     chunks: event["chunks"] as number | undefined,
                     error: event["error"] as string | undefined,
                   };
@@ -125,7 +165,7 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
               break;
             }
             case "summary_progress":
-              set({
+              update({
                 summaryProgress: {
                   completed: event["completed"] as number,
                   total: event["total"] as number,
@@ -133,30 +173,36 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
               });
               break;
             case "summarized":
-              set({ summaryProgress: null });
+              update({ summaryProgress: null });
               break;
             case "error":
-              set({ error: (event["error"] as string) ?? "Upload failed" });
+              update({ error: (event["error"] as string) ?? "Upload failed" });
               break;
           }
         }
       }
     } catch (err) {
-      set({ error: message(err, "Upload failed") });
+      update({ error: message(err, "Upload failed") });
     } finally {
-      set({ isUploading: false, summaryProgress: null });
+      update({ isUploading: false, summaryProgress: null });
       // Refresh regardless: a run that failed partway still indexed whatever
       // it got through, and the list should show that rather than go stale.
-      await get().fetchDocuments(campaignId);
+      if (epoch === viewEpoch) await get().fetchDocuments(campaignId);
     }
   },
 
   removeDocument: async (id) => {
+    const epoch = viewEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === viewEpoch) set(partial);
+    };
     try {
       await api.notes.remove(id);
-      set((state) => ({ documents: state.documents.filter((d) => d.id !== id) }));
+      update((state) => ({
+        documents: state.documents.filter((d) => d.id !== id),
+      }));
     } catch (err) {
-      set({ error: message(err, "Could not delete") });
+      update({ error: message(err, "Could not delete") });
     }
   },
 }));

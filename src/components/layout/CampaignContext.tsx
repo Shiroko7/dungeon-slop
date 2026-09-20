@@ -1,7 +1,13 @@
 import { useCallback, useState } from "react";
 import { useCampaignStore } from "../../store/campaign-store.ts";
 import { api } from "../../store/api.ts";
-import { linkProps, navigate, paths, type Route } from "../../router/router.ts";
+import {
+  captureNavigation,
+  linkProps,
+  navigate,
+  paths,
+  type Route,
+} from "../../router/router.ts";
 import { LoadingSpinner } from "../shared/LoadingSpinner.tsx";
 import { countLine, useConfirm } from "../shared/ConfirmDialog.tsx";
 
@@ -23,13 +29,21 @@ function Group({
   return (
     <section className="ctx-group">
       <div className="ctx-group-head">
-        <button className="ctx-group-toggle" onClick={onToggle} aria-expanded={open}>
+        <button
+          className="ctx-group-toggle"
+          onClick={onToggle}
+          aria-expanded={open}
+        >
           <span className="ctx-group-chevron">{open ? "▾" : "▸"}</span>
           <span className="ctx-group-title">{title}</span>
           <span className="ctx-group-count">{count}</span>
         </button>
         {action !== undefined && (
-          <button className="ctx-group-action" onClick={action.onClick} title={action.label}>
+          <button
+            className="ctx-group-action"
+            onClick={action.onClick}
+            title={action.label}
+          >
             +
           </button>
         )}
@@ -64,11 +78,19 @@ export function CampaignContext({ route }: { route: Route }) {
 
   const newDungeon = useCallback(async () => {
     if (campaignId === null || busy) return;
+    const stillHere = captureNavigation();
     setBusy(true);
     try {
-      const dungeon = await api.dungeons.create(campaignId, { name: "Untitled map" });
+      const dungeon = await api.dungeons.create(campaignId, {
+        name: "Untitled map",
+      });
       await refreshContents(campaignId);
-      navigate(paths.dungeon(campaignId, dungeon.id));
+      if (stillHere()) navigate(paths.dungeon(campaignId, dungeon.id));
+    } catch (err) {
+      if (stillHere())
+        useCampaignStore
+          .getState()
+          .setError(err instanceof Error ? err.message : "Could not create");
     } finally {
       setBusy(false);
     }
@@ -76,11 +98,17 @@ export function CampaignContext({ route }: { route: Route }) {
 
   const newChat = useCallback(async () => {
     if (campaignId === null || busy) return;
+    const stillHere = captureNavigation();
     setBusy(true);
     try {
       const chat = await api.chats.create(campaignId);
       await refreshContents(campaignId);
-      navigate(paths.chat(campaignId, chat.id));
+      if (stillHere()) navigate(paths.chat(campaignId, chat.id));
+    } catch (err) {
+      if (stillHere())
+        useCampaignStore
+          .getState()
+          .setError(err instanceof Error ? err.message : "Could not create");
     } finally {
       setBusy(false);
     }
@@ -130,7 +158,10 @@ export function CampaignContext({ route }: { route: Route }) {
   return (
     <aside className="ctx-panel">
       <header className="ctx-head">
-        <a className="ctx-campaign-name" {...linkProps(paths.campaign(campaignId))}>
+        <a
+          className="ctx-campaign-name"
+          {...linkProps(paths.campaign(campaignId))}
+        >
           {active?.name}
         </a>
         {isLoading && <LoadingSpinner size={12} />}
@@ -155,7 +186,10 @@ export function CampaignContext({ route }: { route: Route }) {
                 >
                   <span className="ctx-item-name" title={d.name}>
                     {d.parentId !== null && (
-                      <span className="ctx-fork-mark" title="Forked from a reroll">
+                      <span
+                        className="ctx-fork-mark"
+                        title="Forked from a reroll"
+                      >
                         ⑂
                       </span>
                     )}
@@ -170,7 +204,14 @@ export function CampaignContext({ route }: { route: Route }) {
                   className="ctx-row-remove"
                   title={`Delete ${d.name}`}
                   aria-label={`Delete ${d.name}`}
-                  onClick={() => void removeDungeon(d.id, d.name, d.roomCount, d.describedCount)}
+                  onClick={() =>
+                    void removeDungeon(
+                      d.id,
+                      d.name,
+                      d.roomCount,
+                      d.describedCount,
+                    )
+                  }
                 >
                   &times;
                 </button>
@@ -198,7 +239,9 @@ export function CampaignContext({ route }: { route: Route }) {
                   <span className="ctx-item-name" title={c.title}>
                     {c.title === "" ? "Untitled thread" : c.title}
                   </span>
-                  <span className="ctx-item-meta">{c.messageCount} messages</span>
+                  <span className="ctx-item-meta">
+                    {c.messageCount} messages
+                  </span>
                 </a>
                 <button
                   className="ctx-row-remove"

@@ -11,7 +11,7 @@
  * the v1 `documents` table, which predates campaigns — live in `migrate.ts` and
  * run first.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
  */
 CREATE TABLE IF NOT EXISTS dungeons (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  revision    INTEGER NOT NULL DEFAULT 0,
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   parent_id   INTEGER          REFERENCES dungeons(id) ON DELETE SET NULL,
   name        TEXT    NOT NULL,
@@ -114,6 +115,14 @@ CREATE TABLE IF NOT EXISTS dungeons (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dungeons_campaign ON dungeons (campaign_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS dungeon_mutations (
+  dungeon_id INTEGER NOT NULL REFERENCES dungeons(id) ON DELETE CASCADE,
+  operation_id TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  PRIMARY KEY (dungeon_id, operation_id)
+);
 
 CREATE TABLE IF NOT EXISTS room_notes (
   dungeon_id  INTEGER NOT NULL REFERENCES dungeons(id) ON DELETE CASCADE,

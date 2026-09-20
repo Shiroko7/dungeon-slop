@@ -12,7 +12,13 @@ import { LoadingSpinner } from "../shared/LoadingSpinner.tsx";
  * over the note index and a tool-running agent above it. Rather than fake a
  * reply, the view says so plainly and keeps the questions.
  */
-export function ChatView({ campaignId, chatId }: { campaignId: number; chatId: number }) {
+export function ChatView({
+  campaignId,
+  chatId,
+}: {
+  campaignId: number;
+  chatId: number;
+}) {
   const chat = useChatStore((s) => s.chat);
   const isLoading = useChatStore((s) => s.isLoading);
   const error = useChatStore((s) => s.error);
@@ -46,10 +52,12 @@ export function ChatView({ campaignId, chatId }: { campaignId: number; chatId: n
     );
   }
 
-  if (chat === null) {
+  if (chat === null || chat.id !== chatId || chat.campaignId !== campaignId) {
     return (
       <div className="chat-view chat-view--loading">
-        <p className="view-error">{error ?? "That thread could not be opened."}</p>
+        <p className="view-error">
+          {error ?? "That thread could not be opened."}
+        </p>
       </div>
     );
   }
@@ -57,7 +65,9 @@ export function ChatView({ campaignId, chatId }: { campaignId: number; chatId: n
   return (
     <div className="chat-view">
       <header className="view-head">
-        <h1 className="view-title">{chat.title === "" ? "New thread" : chat.title}</h1>
+        <h1 className="view-title">
+          {chat.title === "" ? "New thread" : chat.title}
+        </h1>
         <span className="view-sub">
           {noteCount === 0
             ? "This campaign has no notes indexed yet"
@@ -75,8 +85,8 @@ export function ChatView({ campaignId, chatId }: { campaignId: number; chatId: n
       {!noticeDismissed && (
         <div className="view-banner">
           <span>
-            Questions are saved to this thread, but the Loremaster does not answer yet — retrieval
-            over the note index is the next step.
+            Questions are saved to this thread, but the Loremaster does not
+            answer yet — retrieval over the note index is the next step.
           </span>
           <button onClick={() => setNoticeDismissed(true)}>&times;</button>
         </div>

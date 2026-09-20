@@ -12,7 +12,9 @@ function tableExists(db: Database, name: string): boolean {
 }
 
 function columnNames(db: Database, table: string): string[] {
-  const rows = db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  const rows = db.query(`PRAGMA table_info(${table})`).all() as Array<{
+    name: string;
+  }>;
   return rows.map((r) => r.name);
 }
 
@@ -51,24 +53,30 @@ function migrateDocumentsToCampaigns(db: Database): boolean {
   // Only invent a campaign when there is something for it to hold. A v1
   // database that never indexed anything should come out of this looking like a
   // fresh install, not like it has one mysteriously empty campaign.
-  const pending = (db.query("SELECT COUNT(*) AS n FROM documents").get() as { n: number }).n;
+  const pending = (
+    db.query("SELECT COUNT(*) AS n FROM documents").get() as { n: number }
+  ).n;
 
   let campaignId: number | null = null;
   if (pending > 0) {
-    const existing = db.query("SELECT id FROM campaigns ORDER BY id LIMIT 1").get() as
-      | { id: number }
-      | null;
+    const existing = db
+      .query("SELECT id FROM campaigns ORDER BY id LIMIT 1")
+      .get() as { id: number } | null;
 
     if (existing === null) {
       const now = Date.now();
-      db.run("INSERT INTO campaigns (name, blurb, created_at, updated_at) VALUES (?, ?, ?, ?)", [
-        ADOPTED_CAMPAIGN_NAME,
-        "Notes indexed before campaigns existed.",
-        now,
-        now,
-      ]);
+      db.run(
+        "INSERT INTO campaigns (name, blurb, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        [
+          ADOPTED_CAMPAIGN_NAME,
+          "Notes indexed before campaigns existed.",
+          now,
+          now,
+        ],
+      );
       campaignId = Number(
-        (db.query("SELECT last_insert_rowid() AS id").get() as { id: number }).id,
+        (db.query("SELECT last_insert_rowid() AS id").get() as { id: number })
+          .id,
       );
     } else {
       campaignId = existing.id;
@@ -153,14 +161,22 @@ export function runMigrations(db: Database): MigrationReport {
   // `meta` is created by the declarative schema, which has not run yet on a
   // fresh database — so its absence means "nothing to read", not an error.
   const stamped = tableExists(db, "meta")
-    ? (db.query("SELECT value FROM meta WHERE key = 'schema_version'").get() as
-        | { value: string }
-        | null)
+    ? (db
+        .query("SELECT value FROM meta WHERE key = 'schema_version'")
+        .get() as { value: string } | null)
     : null;
   const from = stamped === null ? 1 : Number(stamped.value);
 
   const documentsAdopted = migrateDocumentsToCampaigns(db);
   addDungeonBlueprintColumn(db);
+  if (
+    tableExists(db, "dungeons") &&
+    !columnNames(db, "dungeons").includes("revision")
+  ) {
+    db.run(
+      "ALTER TABLE dungeons ADD COLUMN revision INTEGER NOT NULL DEFAULT 0",
+    );
+  }
 
   return { from, to: SCHEMA_VERSION, documentsAdopted };
 }

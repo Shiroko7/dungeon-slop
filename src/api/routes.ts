@@ -4,7 +4,11 @@ import { handleDescribeRooms, handleDescribeRoom } from "./describe-rooms.ts";
 import { handleGenerateBlueprint } from "./generate-blueprint.ts";
 import { handleRefineLayout } from "./refine-layout.ts";
 import { handleDescribeDungeon } from "./describe-dungeon.ts";
-import { handleDeleteNote, handleListNotes, handleUploadNotes } from "./upload-notes.ts";
+import {
+  handleDeleteNote,
+  handleListNotes,
+  handleUploadNotes,
+} from "./upload-notes.ts";
 import {
   handleCreateCampaign,
   handleDeleteCampaign,
@@ -32,9 +36,14 @@ import {
   handleTruncateMessages,
   handleUpdateChat,
 } from "./chats.ts";
-import { handleLegacyImport, handleLegacyImportStatus } from "./legacy-import.ts";
+import {
+  handleLegacyImport,
+  handleLegacyImportStatus,
+} from "./legacy-import.ts";
 import { handleUsage } from "./usage.ts";
-import { json } from "./http.ts";
+import { json, readJson, badRequest, serverError } from "./http.ts";
+import { checkOrigin } from "./origin.ts";
+import { validateAIRequest } from "./ownership.ts";
 
 /**
  * Routes are matched against a small table rather than a chain of `if`s, so the
@@ -54,55 +63,198 @@ interface Route {
 
 const routes: Route[] = [
   // ─── campaigns ────────────────────────────────────────────────────────────
-  { method: "GET", pattern: /^\/api\/campaigns$/, handle: () => handleListCampaigns() },
-  { method: "POST", pattern: /^\/api\/campaigns$/, handle: (req) => handleCreateCampaign(req) },
-  { method: "GET", pattern: /^\/api\/campaigns\/(\d+)$/, handle: (_r, [id]) => handleGetCampaign(id!) },
-  { method: "PATCH", pattern: /^\/api\/campaigns\/(\d+)$/, handle: (req, [id]) => handleUpdateCampaign(req, id!) },
-  { method: "DELETE", pattern: /^\/api\/campaigns\/(\d+)$/, handle: (_r, [id]) => handleDeleteCampaign(id!) },
+  {
+    method: "GET",
+    pattern: /^\/api\/campaigns$/,
+    handle: () => handleListCampaigns(),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/campaigns$/,
+    handle: (req) => handleCreateCampaign(req),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/campaigns\/(\d+)$/,
+    handle: (_r, [id]) => handleGetCampaign(id!),
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/campaigns\/(\d+)$/,
+    handle: (req, [id]) => handleUpdateCampaign(req, id!),
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/campaigns\/(\d+)$/,
+    handle: (_r, [id]) => handleDeleteCampaign(id!),
+  },
 
   // ─── notes, owned by a campaign ───────────────────────────────────────────
-  { method: "GET", pattern: /^\/api\/campaigns\/(\d+)\/notes$/, handle: (_r, [id]) => handleListNotes(id!) },
-  { method: "POST", pattern: /^\/api\/campaigns\/(\d+)\/notes$/, handle: (req, [id]) => handleUploadNotes(req, id!) },
-  { method: "DELETE", pattern: /^\/api\/notes\/(\d+)$/, handle: (_r, [id]) => handleDeleteNote(id!) },
+  {
+    method: "GET",
+    pattern: /^\/api\/campaigns\/(\d+)\/notes$/,
+    handle: (_r, [id]) => handleListNotes(id!),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/campaigns\/(\d+)\/notes$/,
+    handle: (req, [id]) => handleUploadNotes(req, id!),
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/notes\/(\d+)$/,
+    handle: (_r, [id]) => handleDeleteNote(id!),
+  },
 
   // ─── dungeons, owned by a campaign ────────────────────────────────────────
-  { method: "GET", pattern: /^\/api\/campaigns\/(\d+)\/dungeons$/, handle: (_r, [id]) => handleListDungeons(id!) },
-  { method: "POST", pattern: /^\/api\/campaigns\/(\d+)\/dungeons$/, handle: (req, [id]) => handleCreateDungeon(req, id!) },
-  { method: "GET", pattern: /^\/api\/dungeons\/(\d+)$/, handle: (_r, [id]) => handleGetDungeon(id!) },
-  { method: "PATCH", pattern: /^\/api\/dungeons\/(\d+)$/, handle: (req, [id]) => handleUpdateDungeon(req, id!) },
-  { method: "DELETE", pattern: /^\/api\/dungeons\/(\d+)$/, handle: (_r, [id]) => handleDeleteDungeon(id!) },
-  { method: "POST", pattern: /^\/api\/dungeons\/(\d+)\/fork$/, handle: (req, [id]) => handleForkDungeon(req, id!) },
-  { method: "GET", pattern: /^\/api\/dungeons\/(\d+)\/chat$/, handle: (_r, [id]) => handleArchitectChat(id!) },
-  { method: "PUT", pattern: /^\/api\/dungeons\/(\d+)\/rooms\/(\d+)$/, handle: (req, [id, room]) => handlePutRoomNote(req, id!, room!) },
-  { method: "DELETE", pattern: /^\/api\/dungeons\/(\d+)\/rooms\/(\d+)$/, handle: (_r, [id, room]) => handleDeleteRoomNote(id!, room!) },
+  {
+    method: "GET",
+    pattern: /^\/api\/campaigns\/(\d+)\/dungeons$/,
+    handle: (_r, [id]) => handleListDungeons(id!),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/campaigns\/(\d+)\/dungeons$/,
+    handle: (req, [id]) => handleCreateDungeon(req, id!),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/dungeons\/(\d+)$/,
+    handle: (_r, [id]) => handleGetDungeon(id!),
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/dungeons\/(\d+)$/,
+    handle: (req, [id]) => handleUpdateDungeon(req, id!),
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/dungeons\/(\d+)$/,
+    handle: (_r, [id]) => handleDeleteDungeon(id!),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/dungeons\/(\d+)\/fork$/,
+    handle: (req, [id]) => handleForkDungeon(req, id!),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/dungeons\/(\d+)\/chat$/,
+    handle: (_r, [id]) => handleArchitectChat(id!),
+  },
+  {
+    method: "PUT",
+    pattern: /^\/api\/dungeons\/(\d+)\/rooms\/(\d+)$/,
+    handle: (req, [id, room]) => handlePutRoomNote(req, id!, room!),
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/dungeons\/(\d+)\/rooms\/(\d+)$/,
+    handle: (req, [id, room]) => handleDeleteRoomNote(req, id!, room!),
+  },
 
   // ─── chats, owned by a campaign ───────────────────────────────────────────
-  { method: "GET", pattern: /^\/api\/campaigns\/(\d+)\/chats$/, handle: (_r, [id]) => handleListChats(id!) },
-  { method: "POST", pattern: /^\/api\/campaigns\/(\d+)\/chats$/, handle: (req, [id]) => handleCreateChat(req, id!) },
-  { method: "GET", pattern: /^\/api\/chats\/(\d+)$/, handle: (_r, [id]) => handleGetChat(id!) },
-  { method: "PATCH", pattern: /^\/api\/chats\/(\d+)$/, handle: (req, [id]) => handleUpdateChat(req, id!) },
-  { method: "DELETE", pattern: /^\/api\/chats\/(\d+)$/, handle: (_r, [id]) => handleDeleteChat(id!) },
-  { method: "POST", pattern: /^\/api\/chats\/(\d+)\/messages$/, handle: (req, [id]) => handleAppendMessage(req, id!) },
-  { method: "DELETE", pattern: /^\/api\/chats\/(\d+)\/messages\/(\d+)$/, handle: (_r, [id, index]) => handleTruncateMessages(id!, index!) },
+  {
+    method: "GET",
+    pattern: /^\/api\/campaigns\/(\d+)\/chats$/,
+    handle: (_r, [id]) => handleListChats(id!),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/campaigns\/(\d+)\/chats$/,
+    handle: (req, [id]) => handleCreateChat(req, id!),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/chats\/(\d+)$/,
+    handle: (_r, [id]) => handleGetChat(id!),
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/chats\/(\d+)$/,
+    handle: (req, [id]) => handleUpdateChat(req, id!),
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/chats\/(\d+)$/,
+    handle: (_r, [id]) => handleDeleteChat(id!),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/chats\/(\d+)\/messages$/,
+    handle: (req, [id]) => handleAppendMessage(req, id!),
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/chats\/(\d+)\/messages\/(\d+)$/,
+    handle: (_r, [id, index]) => handleTruncateMessages(id!, index!),
+  },
 
   // ─── generation (stateless; the client owns what comes back) ──────────────
-  { method: "POST", pattern: /^\/api\/generate-config$/, handle: (req) => handleGenerateConfig(req) },
-  { method: "POST", pattern: /^\/api\/generate-dungeon$/, handle: (req) => handleGenerateDungeon(req) },
-  { method: "POST", pattern: /^\/api\/generate-blueprint$/, handle: (req) => handleGenerateBlueprint(req) },
-  { method: "POST", pattern: /^\/api\/refine-layout$/, handle: (req) => handleRefineLayout(req) },
-  { method: "POST", pattern: /^\/api\/describe-rooms$/, handle: (req) => handleDescribeRooms(req) },
-  { method: "POST", pattern: /^\/api\/describe-dungeon$/, handle: (req) => handleDescribeDungeon(req) },
-  { method: "POST", pattern: /^\/api\/describe-room\/(\d+)$/, handle: (req, [id]) => handleDescribeRoom(req, String(id)) },
+  {
+    method: "POST",
+    pattern: /^\/api\/generate-config$/,
+    handle: (req) => handleGenerateConfig(req),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/generate-dungeon$/,
+    handle: (req) => handleGenerateDungeon(req),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/generate-blueprint$/,
+    handle: (req) => handleGenerateBlueprint(req),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/refine-layout$/,
+    handle: (req) => handleRefineLayout(req),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/describe-rooms$/,
+    handle: (req) => handleDescribeRooms(req),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/describe-dungeon$/,
+    handle: (req) => handleDescribeDungeon(req),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/describe-room\/(\d+)$/,
+    handle: (req, [id]) => handleDescribeRoom(req, String(id)),
+  },
 
   // ─── one-shot localStorage migration ──────────────────────────────────────
   // ─── spend ledger ─────────────────────────────────────────────────────────
-  { method: "GET", pattern: /^\/api\/usage$/, handle: (req) => handleUsage(req) },
+  {
+    method: "GET",
+    pattern: /^\/api\/usage$/,
+    handle: (req) => handleUsage(req),
+  },
 
-  { method: "GET", pattern: /^\/api\/legacy-import$/, handle: () => handleLegacyImportStatus() },
-  { method: "POST", pattern: /^\/api\/legacy-import$/, handle: (req) => handleLegacyImport(req) },
+  {
+    method: "GET",
+    pattern: /^\/api\/legacy-import$/,
+    handle: () => handleLegacyImportStatus(),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/legacy-import$/,
+    handle: (req) => handleLegacyImport(req),
+  },
 ];
 
-export async function handleApiRoute(req: Request, pathname: string): Promise<Response | null> {
+export async function handleApiRoute(
+  req: Request,
+  pathname: string,
+): Promise<Response | null> {
+  if (pathname.startsWith("/api/")) {
+    const rejected = checkOrigin(req);
+    if (rejected) return rejected;
+  }
   if (pathname === "/api/health") {
     return new Response(JSON.stringify({ status: "ok" }), {
       headers: { "Content-Type": "application/json" },
@@ -118,12 +270,30 @@ export async function handleApiRoute(req: Request, pathname: string): Promise<Re
     if (route.method !== req.method) continue;
 
     const ids = match.slice(1).map(Number);
-    return route.handle(req, ids);
+    if (ids.some((id) => !Number.isSafeInteger(id)))
+      return badRequest("Invalid route ID");
+    if (
+      ["POST", "PUT", "PATCH"].includes(req.method) &&
+      !pathname.endsWith("/notes")
+    ) {
+      const body = await readJson<Record<string, unknown>>(req.clone());
+      if (!body) return badRequest("Expected a JSON object");
+      if (/^\/api\/(generate-|describe-|refine-)/.test(pathname)) {
+        const rejected = validateAIRequest(body);
+        if (rejected) return rejected;
+      }
+    }
+    try {
+      return await route.handle(req, ids);
+    } catch (err) {
+      return serverError(err);
+    }
   }
 
   // A path that exists under a different verb gets a 405, not a 404 — answering
   // "not found" would send a client hunting for a typo in a correct URL.
-  if (pathMatched) return json({ error: `${req.method} is not allowed on ${pathname}` }, 405);
+  if (pathMatched)
+    return json({ error: `${req.method} is not allowed on ${pathname}` }, 405);
 
   return null;
 }

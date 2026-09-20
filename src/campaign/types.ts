@@ -9,7 +9,11 @@
  */
 import type { Blueprint } from "../ai/blueprint.ts";
 import type { DungeonConfig } from "../ai/schema.ts";
-import type { Dungeon, DungeonDescription, RoomDescription } from "../engine/types.ts";
+import type {
+  Dungeon,
+  DungeonDescription,
+  RoomDescription,
+} from "../engine/types.ts";
 
 /** The root object. Everything else is inside exactly one of these. */
 export interface Campaign {
@@ -31,6 +35,7 @@ export interface CampaignInput {
 /** Enough to render a dungeon in a list without loading its geometry. */
 export interface DungeonSummary {
   id: number;
+  revision: number;
   campaignId: number;
   /** Set when this dungeon was forked off another by a reroll. */
   parentId: number | null;
@@ -63,7 +68,15 @@ export interface DungeonInput {
   parentId?: number | null;
 }
 
-export type DungeonPatch = Partial<DungeonInput>;
+export type DungeonPatch = Partial<Omit<DungeonInput, "parentId">> & {
+  roomNotes?: Array<[number, RoomDescription | null]>;
+};
+
+export interface DungeonMutation {
+  expectedRevision: number;
+  operationId: string;
+  patch: DungeonPatch;
+}
 
 export interface ChatSummary {
   id: number;

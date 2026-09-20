@@ -22,17 +22,45 @@ const NO_MINIMAL: ThinkingLevel[] = ["low", "medium", "high"];
  * not guessed.
  */
 const MODELS: AIModelInfo[] = [
-  { id: "gemini-3.8-flash",         label: "3.8 Flash (newest)",     thinkingLevels: NO_MINIMAL },
-  { id: "gemini-3.7-flash",         label: "3.7 Flash",              thinkingLevels: NO_MINIMAL },
-  { id: "gemini-3.6-flash",         label: "3.6 Flash",              thinkingLevels: ALL },
-  { id: "gemini-3.5-flash",         label: "3.5 Flash",              thinkingLevels: ALL },
-  { id: "gemini-3.5-flash-lite",    label: "3.5 Flash Lite (cheap)", thinkingLevels: ALL },
-  { id: "gemini-3.1-flash-lite",    label: "3.1 Flash Lite",         thinkingLevels: ALL },
-  { id: "gemini-3.1-pro-preview",   label: "3.1 Pro (preview)",      thinkingLevels: NO_MINIMAL },
-  { id: "gemini-3-flash-preview",   label: "3.0 Flash (preview)",    thinkingLevels: ALL },
-  { id: "gemini-flash-latest",      label: "Flash (rolling alias)",  thinkingLevels: NO_MINIMAL },
-  { id: "gemini-flash-lite-latest", label: "Flash Lite (rolling)",   thinkingLevels: ALL },
-  { id: "gemini-pro-latest",        label: "Pro (rolling alias)",    thinkingLevels: NO_MINIMAL },
+  {
+    id: "gemini-3.8-flash",
+    label: "3.8 Flash (newest)",
+    thinkingLevels: NO_MINIMAL,
+  },
+  { id: "gemini-3.7-flash", label: "3.7 Flash", thinkingLevels: NO_MINIMAL },
+  { id: "gemini-3.6-flash", label: "3.6 Flash", thinkingLevels: ALL },
+  { id: "gemini-3.5-flash", label: "3.5 Flash", thinkingLevels: ALL },
+  {
+    id: "gemini-3.5-flash-lite",
+    label: "3.5 Flash Lite (cheap)",
+    thinkingLevels: ALL,
+  },
+  { id: "gemini-3.1-flash-lite", label: "3.1 Flash Lite", thinkingLevels: ALL },
+  {
+    id: "gemini-3.1-pro-preview",
+    label: "3.1 Pro (preview)",
+    thinkingLevels: NO_MINIMAL,
+  },
+  {
+    id: "gemini-3-flash-preview",
+    label: "3.0 Flash (preview)",
+    thinkingLevels: ALL,
+  },
+  {
+    id: "gemini-flash-latest",
+    label: "Flash (rolling alias)",
+    thinkingLevels: NO_MINIMAL,
+  },
+  {
+    id: "gemini-flash-lite-latest",
+    label: "Flash Lite (rolling)",
+    thinkingLevels: ALL,
+  },
+  {
+    id: "gemini-pro-latest",
+    label: "Pro (rolling alias)",
+    thinkingLevels: NO_MINIMAL,
+  },
 ];
 
 const DEFAULT_MODEL = "gemini-3.8-flash";
@@ -76,10 +104,15 @@ function convertMessages(messages: AIMessage[]): {
       // at more reliably when the image precedes the question about it.
       const parts: GeminiPart[] = [];
       for (const image of msg.images ?? []) {
-        parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
+        parts.push({
+          inlineData: { mimeType: image.mimeType, data: image.data },
+        });
       }
       parts.push({ text: msg.content });
-      contents.push({ role: msg.role === "assistant" ? "model" : "user", parts });
+      contents.push({
+        role: msg.role === "assistant" ? "model" : "user",
+        parts,
+      });
     }
   }
 
@@ -133,12 +166,19 @@ function buildRequest(options: AICompletionOptions): {
   return { model, body };
 }
 
-async function postOrThrow(url: string, body: Record<string, unknown>): Promise<Response> {
+async function postOrThrow(
+  url: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<Response> {
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(300_000),
+    signal: AbortSignal.any([
+      AbortSignal.timeout(300_000),
+      ...(signal ? [signal] : []),
+    ]),
   });
 
   if (!response.ok) {
@@ -154,18 +194,27 @@ export const geminiProvider: AIProvider = {
   models: MODELS,
   defaultModel: DEFAULT_MODEL,
 
-  async complete(apiKey: string, options: AICompletionOptions): Promise<AICompletionResult> {
+  async complete(
+    apiKey: string,
+    options: AICompletionOptions,
+  ): Promise<AICompletionResult> {
     const { model, body } = buildRequest(options);
     const url = `${BASE_URL}/models/${model}:generateContent?key=${apiKey}`;
 
-    const response = await postOrThrow(url, body);
+    const response = await postOrThrow(url, body, options.signal);
     const data = (await response.json()) as GeminiResponse;
 
     const parts = data.candidates?.[0]?.content?.parts ?? [];
     // Reasoning parts are interleaved with answer parts and must never be
     // concatenated into content - in JSON mode that alone breaks the parse.
-    const content = parts.filter((p) => p.thought !== true).map((p) => p.text ?? "").join("");
-    const thoughts = parts.filter((p) => p.thought === true).map((p) => p.text ?? "").join("");
+    const content = parts
+      .filter((p) => p.thought !== true)
+      .map((p) => p.text ?? "")
+      .join("");
+    const thoughts = parts
+      .filter((p) => p.thought === true)
+      .map((p) => p.text ?? "")
+      .join("");
 
     return {
       content,
@@ -186,7 +235,7 @@ export const geminiProvider: AIProvider = {
     const { model, body } = buildRequest(options);
     const url = `${BASE_URL}/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
-    const response = await postOrThrow(url, body);
+    const response = await postOrThrow(url, body, options.signal);
     if (!response.body) {
       throw new Error("Gemini API returned no response body for stream");
     }

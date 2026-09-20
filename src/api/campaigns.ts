@@ -23,8 +23,18 @@ export async function handleCreateCampaign(req: Request): Promise<Response> {
   if (body === null || typeof body.name !== "string") {
     return badRequest("Expected a JSON body with a name");
   }
+  if (body.blurb !== undefined && typeof body.blurb !== "string")
+    return badRequest("blurb must be a string");
   try {
-    return json({ campaign: createCampaign(appDb(), { name: body.name, blurb: body.blurb }) }, 201);
+    return json(
+      {
+        campaign: createCampaign(appDb(), {
+          name: body.name,
+          blurb: body.blurb,
+        }),
+      },
+      201,
+    );
   } catch (err) {
     return err instanceof Error && /needs a name/i.test(err.message)
       ? badRequest(err.message)
@@ -32,16 +42,26 @@ export async function handleCreateCampaign(req: Request): Promise<Response> {
   }
 }
 
-export async function handleUpdateCampaign(req: Request, id: number): Promise<Response> {
+export async function handleUpdateCampaign(
+  req: Request,
+  id: number,
+): Promise<Response> {
   const body = await readJson<Partial<CampaignInput>>(req);
   if (body === null) return badRequest("Expected a JSON body");
+  if (
+    (body.name !== undefined && typeof body.name !== "string") ||
+    (body.blurb !== undefined && typeof body.blurb !== "string")
+  )
+    return badRequest("Campaign fields must be strings");
 
   try {
     const campaign = updateCampaign(appDb(), id, {
       ...(typeof body.name === "string" ? { name: body.name } : {}),
       ...(typeof body.blurb === "string" ? { blurb: body.blurb } : {}),
     });
-    return campaign === null ? notFound(`No campaign ${id}`) : json({ campaign });
+    return campaign === null
+      ? notFound(`No campaign ${id}`)
+      : json({ campaign });
   } catch (err) {
     return err instanceof Error && /needs a name/i.test(err.message)
       ? badRequest(err.message)

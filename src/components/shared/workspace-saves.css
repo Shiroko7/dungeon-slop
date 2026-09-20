@@ -1,0 +1,40 @@
+.workspace-saves {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
+  max-height: 35vh;
+  overflow: auto;
+}
+.workspace > .dungeon-view {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+.workspace-saves:empty {
+  display: none;
+}
+.workspace-saves button {
+  margin: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid currentColor;
+  border-radius: 0.3rem;
+}
+.workspace-saves button:focus-visible,
+.workspace-saves summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+.save-recovery {
+  border-left: 3px solid #b88a45;
+  padding: 0.4rem 0.7rem;
+  margin: 0.3rem 0;
+  overflow-wrap: anywhere;
+}
+.save-recovery small {
+  display: block;
+}
+.save-recovery pre {
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}

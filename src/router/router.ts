@@ -14,14 +14,25 @@ export type Route =
   | { view: "notes"; campaignId: number }
   | { view: "usage"; campaignId: number }
   | { view: "chat"; campaignId: number; chatId: number }
-  | { view: "dungeon"; campaignId: number; dungeonId: number; roomId: number | null }
+  | {
+      view: "dungeon";
+      campaignId: number;
+      dungeonId: number;
+      roomId: number | null;
+    }
   | { view: "unknown"; path: string };
 
 const PATTERNS: Array<[RegExp, (m: RegExpExecArray) => Route]> = [
   [/^\/?$/, () => ({ view: "picker" })],
   [/^\/c\/(\d+)\/?$/, (m) => ({ view: "campaign", campaignId: Number(m[1]) })],
-  [/^\/c\/(\d+)\/notes\/?$/, (m) => ({ view: "notes", campaignId: Number(m[1]) })],
-  [/^\/c\/(\d+)\/usage\/?$/, (m) => ({ view: "usage", campaignId: Number(m[1]) })],
+  [
+    /^\/c\/(\d+)\/notes\/?$/,
+    (m) => ({ view: "notes", campaignId: Number(m[1]) }),
+  ],
+  [
+    /^\/c\/(\d+)\/usage\/?$/,
+    (m) => ({ view: "usage", campaignId: Number(m[1]) }),
+  ],
   [
     /^\/c\/(\d+)\/chat\/(\d+)\/?$/,
     (m) => ({ view: "chat", campaignId: Number(m[1]), chatId: Number(m[2]) }),
@@ -64,15 +75,19 @@ export const paths = {
   campaign: (campaignId: number): string => `/c/${campaignId}`,
   notes: (campaignId: number): string => `/c/${campaignId}/notes`,
   usage: (campaignId: number): string => `/c/${campaignId}/usage`,
-  chat: (campaignId: number, chatId: number): string => `/c/${campaignId}/chat/${chatId}`,
-  dungeon: (campaignId: number, dungeonId: number): string => `/c/${campaignId}/d/${dungeonId}`,
+  chat: (campaignId: number, chatId: number): string =>
+    `/c/${campaignId}/chat/${chatId}`,
+  dungeon: (campaignId: number, dungeonId: number): string =>
+    `/c/${campaignId}/d/${dungeonId}`,
   room: (campaignId: number, dungeonId: number, roomId: number): string =>
     `/c/${campaignId}/d/${dungeonId}/r/${roomId}`,
 };
 
 /** Which campaign a route belongs to, or null at the picker. */
 export function campaignOf(route: Route): number | null {
-  return route.view === "picker" || route.view === "unknown" ? null : route.campaignId;
+  return route.view === "picker" || route.view === "unknown"
+    ? null
+    : route.campaignId;
 }
 
 // ─── navigation ───────────────────────────────────────────────────────────────
@@ -80,13 +95,29 @@ export function campaignOf(route: Route): number | null {
 const NAVIGATION_EVENT = "dungeon-slop:navigate";
 
 const listeners = new Set<() => void>();
+let navigationEpoch = 0;
+if (typeof window !== "undefined")
+  window.addEventListener("popstate", () => {
+    navigationEpoch++;
+  });
+
+/** Guard follow-up navigation after an asynchronous create/delete/fork. */
+export function captureNavigation(): () => boolean {
+  const epoch = navigationEpoch;
+  const path = window.location.pathname;
+  return () => navigationEpoch === epoch && window.location.pathname === path;
+}
 
 function emit(): void {
   for (const listener of listeners) listener();
 }
 
-export function navigate(path: string, options: { replace?: boolean } = {}): void {
+export function navigate(
+  path: string,
+  options: { replace?: boolean } = {},
+): void {
   if (path === window.location.pathname) return;
+  navigationEpoch++;
   if (options.replace === true) {
     window.history.replaceState(null, "", path);
   } else {
@@ -95,7 +126,7 @@ export function navigate(path: string, options: { replace?: boolean } = {}): voi
   emit();
 }
 
-function subscribe(listener: () => void): () => void {
+export function subscribeNavigation(listener: () => void): () => void {
   listeners.add(listener);
   window.addEventListener("popstate", listener);
   window.addEventListener(NAVIGATION_EVENT, listener);
@@ -129,7 +160,11 @@ function getServerSnapshot(): Route {
 }
 
 export function useRoute(): Route {
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  return useSyncExternalStore(
+    subscribeNavigation,
+    getSnapshot,
+    getServerSnapshot,
+  );
 }
 
 /**

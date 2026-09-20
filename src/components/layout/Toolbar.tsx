@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
 import { useCampaignStore } from "../../store/campaign-store.ts";
 import { useUIStore } from "../../store/ui-store.ts";
-import { navigate, paths } from "../../router/router.ts";
+import { captureNavigation, navigate, paths } from "../../router/router.ts";
 import type { DungeonRecord } from "../../campaign/types.ts";
 import { Button } from "../shared/Button.tsx";
 
@@ -12,7 +12,9 @@ export function Toolbar() {
   const config = useDungeonStore((s) => s.config);
   const dungeon = useDungeonStore((s) => s.dungeon);
   const isGeneratingDungeon = useDungeonStore((s) => s.isGeneratingDungeon);
-  const generateDungeonFromConfig = useDungeonStore((s) => s.generateDungeonFromConfig);
+  const generateDungeonFromConfig = useDungeonStore(
+    (s) => s.generateDungeonFromConfig,
+  );
   const rerollDungeon = useDungeonStore((s) => s.rerollDungeon);
   const undoEdit = useDungeonStore((s) => s.undoEdit);
   const redoEdit = useDungeonStore((s) => s.redoEdit);
@@ -41,8 +43,9 @@ export function Toolbar() {
   const followFork = useCallback(
     async (record: DungeonRecord | null) => {
       if (record === null || campaignId === null) return;
+      const stillHere = captureNavigation();
       await refreshContents(campaignId);
-      navigate(paths.dungeon(campaignId, record.id));
+      if (stillHere()) navigate(paths.dungeon(campaignId, record.id));
     },
     [campaignId, refreshContents],
   );
@@ -82,7 +85,12 @@ export function Toolbar() {
   return (
     <div className="toolbar">
       <div className="toolbar-left">
-        <Button variant="icon" size="sm" onClick={toggleSidebar} aria-label="Toggle sidebar">
+        <Button
+          variant="icon"
+          size="sm"
+          onClick={toggleSidebar}
+          aria-label="Toggle sidebar"
+        >
           &#9776;
         </Button>
 
@@ -99,7 +107,9 @@ export function Toolbar() {
 
         {config && (
           <div className="seed-control">
-            <label className="seed-control-label" htmlFor="seed-input">Seed</label>
+            <label className="seed-control-label" htmlFor="seed-input">
+              Seed
+            </label>
             <input
               id="seed-input"
               type="text"
@@ -162,14 +172,29 @@ export function Toolbar() {
 
         <span className="toolbar-divider" />
 
-        <Button variant="icon" size="sm" onClick={handleZoomOut} aria-label="Zoom out">
+        <Button
+          variant="icon"
+          size="sm"
+          onClick={handleZoomOut}
+          aria-label="Zoom out"
+        >
           &minus;
         </Button>
         <span className="toolbar-zoom-label">{Math.round(zoom * 100)}%</span>
-        <Button variant="icon" size="sm" onClick={handleZoomIn} aria-label="Zoom in">
+        <Button
+          variant="icon"
+          size="sm"
+          onClick={handleZoomIn}
+          aria-label="Zoom in"
+        >
           +
         </Button>
-        <Button variant="icon" size="sm" onClick={resetView} aria-label="Reset view">
+        <Button
+          variant="icon"
+          size="sm"
+          onClick={resetView}
+          aria-label="Reset view"
+        >
           &#8634;
         </Button>
       </div>

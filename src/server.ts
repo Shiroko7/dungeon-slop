@@ -1,3 +1,4 @@
+import { API_HOST } from "./api/origin.ts";
 import { join } from "node:path";
 import { handleApiRoute } from "./api/routes.ts";
 
@@ -30,6 +31,7 @@ async function serveStatic(pathname: string): Promise<Response | null> {
 
 Bun.serve({
   port: PORT,
+  hostname: API_HOST,
   // Bun defaults to 10s, which is shorter than a single describe call: with
   // thinking on, time-to-first-token alone can pass that, and the connection is
   // genuinely idle until the first SSE frame. 255 is Bun's ceiling and sits just
@@ -51,8 +53,10 @@ Bun.serve({
     const staticResponse = await serveStatic(pathname);
     if (staticResponse) return staticResponse;
 
-    return new Response("No build found — run `bun run build` first.", { status: 404 });
+    return new Response("No build found — run `bun run build` first.", {
+      status: 404,
+    });
   },
 });
 
-console.log(`Server running at http://localhost:${PORT}`);
+console.log(`Server running at http://${API_HOST}:${PORT}`);

@@ -1,4 +1,10 @@
-import type { AIProvider, AIModelInfo, AICompletionOptions, AICompletionResult, AIMessage } from "../types.ts";
+import type {
+  AIProvider,
+  AIModelInfo,
+  AICompletionOptions,
+  AICompletionResult,
+  AIMessage,
+} from "../types.ts";
 
 const BASE_URL = "http://localhost:11434";
 const DEFAULT_MODEL = "qwen3:8b";
@@ -29,7 +35,10 @@ export const ollamaProvider: AIProvider = {
   models: MODELS,
   defaultModel: DEFAULT_MODEL,
 
-  async complete(_apiKey: string, options: AICompletionOptions): Promise<AICompletionResult> {
+  async complete(
+    _apiKey: string,
+    options: AICompletionOptions,
+  ): Promise<AICompletionResult> {
     const body: Record<string, unknown> = {
       model: options.model ?? DEFAULT_MODEL,
       messages: convertMessages(options.messages),
@@ -47,7 +56,10 @@ export const ollamaProvider: AIProvider = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.any([
+        AbortSignal.timeout(300_000),
+        ...(options.signal ? [options.signal] : []),
+      ]),
     });
 
     if (!response.ok) {
@@ -67,7 +79,10 @@ export const ollamaProvider: AIProvider = {
     };
   },
 
-  async *streamComplete(_apiKey: string, options: AICompletionOptions): AsyncGenerator<string, AICompletionResult> {
+  async *streamComplete(
+    _apiKey: string,
+    options: AICompletionOptions,
+  ): AsyncGenerator<string, AICompletionResult> {
     const body: Record<string, unknown> = {
       model: options.model ?? DEFAULT_MODEL,
       messages: convertMessages(options.messages),
@@ -85,7 +100,10 @@ export const ollamaProvider: AIProvider = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.any([
+        AbortSignal.timeout(300_000),
+        ...(options.signal ? [options.signal] : []),
+      ]),
     });
 
     if (!response.ok) {
