@@ -77,6 +77,45 @@ describe("route matching", () => {
   test("health answers without touching the database", async () => {
     expect((await call("GET", "/api/health")).body).toEqual({ status: "ok" });
   });
+
+  test("authored replacements checkpoint and restore without losing revisions", async () => {
+    const campaign = (await call("POST", "/api/campaigns", { name: "History" })).body.campaign;
+    const dungeon = (await call("POST", `/api/campaigns/${campaign.id}/dungeons`, {
+      name: "Versioned",
+      geometry: geometry([1]),
+      overview: { history: "old", corridorFeatures: [], wanderingMonsters: [] },
+    })).body.dungeon;
+    const first = {
+      expectedRevision: 0,
+      operationId: crypto.randomUUID(),
+      patch: { overview: { history: "new", corridorFeatures: [], wanderingMonsters: [] } },
+    };
+    expect((await call("PATCH", `/api/dungeons/${dungeon.id}`, first)).status).toBe(200);
+    const revisions = await call("GET", `/api/dungeons/${dungeon.id}/revisions`);
+    expect(revisions.body.revisions).toHaveLength(1);
+    const restore = await call("POST", `/api/dungeons/${dungeon.id}/revisions/${revisions.body.revisions[0].id}/restore`, {
+      expectedRevision: 1,
+      operationId: crypto.randomUUID(),
+    });
+    expect(restore.status).toBe(200);
+    expect(restore.body.dungeon.overview.history).toBe("old");
+    expect(restore.body.revision).toBe(2);
+  });
+
+  test("fork operation IDs make an ambiguous retry return the same sibling", async () => {
+    const campaign = (await call("POST", "/api/campaigns", { name: "Fork receipts" })).body.campaign;
+    const dungeon = (await call("POST", `/api/campaigns/${campaign.id}/dungeons`, {
+      name: "Parent", geometry: geometry([1]),
+    })).body.dungeon;
+    const operationId = crypto.randomUUID();
+    const body = { expectedRevision: 0, operationId, seed: 9, geometry: geometry([2]) };
+    const first = await call("POST", `/api/dungeons/${dungeon.id}/fork`, body);
+    const second = await call("POST", `/api/dungeons/${dungeon.id}/fork`, body);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect(second.body.dungeon.id).toBe(first.body.dungeon.id);
+    expect((await call("GET", `/api/campaigns/${campaign.id}/dungeons`)).body.dungeons).toHaveLength(2);
+  });
 });
 
 // ─── the ownership tree, over HTTP ────────────────────────────────────────────

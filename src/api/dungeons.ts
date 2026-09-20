@@ -6,12 +6,16 @@ import {
   createDungeon,
   deleteDungeon,
   forkDungeon,
+  getForkByOperation,
   getDungeon,
   listDungeons,
 } from "../campaign/dungeons.ts";
 import { architectChat } from "../campaign/chats.ts";
 import type { DungeonInput } from "../campaign/types.ts";
 import { badRequest, json, notFound, readJson, serverError } from "./http.ts";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { getDungeonRevision, listDungeonRevisions } from "../campaign/revisions.ts";
 
 export function handleListDungeons(campaignId: number): Response {
   if (!campaignExists(appDb(), campaignId))
@@ -111,6 +115,46 @@ export async function handleForkDungeon(
   if (!raw) return badRequest("Expected a JSON object");
   const parent = getDungeon(appDb(), id);
   if (!parent) return notFound(`No dungeon ${id}`);
+  const rawOperationId = raw.operationId;
+  if (rawOperationId !== undefined && typeof rawOperationId !== "string")
+    return badRequest("operationId must be a UUID");
+  if (
+    typeof rawOperationId === "string" &&
+    !z.string().uuid().safeParse(rawOperationId).success
+  )
+    return badRequest("operationId must be a UUID");
+  const { expectedRevision, operationId: _, ...input } = raw;
+  if (
+    typeof expectedRevision !== "number" ||
+    !Number.isInteger(expectedRevision) ||
+    expectedRevision < 0
+  )
+    return badRequest("expectedRevision must be a non-negative integer");
+  const parsed = DungeonPatchSchema.omit({
+    roomNotes: true,
+    overview: true,
+  }).safeParse(input);
+  if (!parsed.success) return badRequest(parsed.error.message);
+  const body = parsed.data as Partial<DungeonInput>;
+  const operationId =
+    typeof rawOperationId === "string" ? rawOperationId : randomUUID();
+  if (typeof rawOperationId === "string") {
+    const existing = getForkByOperation(appDb(), id, rawOperationId);
+    if (existing) {
+      const same =
+        existing.seed === (body.seed ?? null) &&
+        JSON.stringify(existing.config) === JSON.stringify(body.config ?? null) &&
+        JSON.stringify(existing.geometry) === JSON.stringify(body.geometry ?? null) &&
+        JSON.stringify(existing.blueprint) === JSON.stringify(body.blueprint ?? null) &&
+        (body.name === undefined || existing.name === body.name);
+      if (!same)
+        return json(
+          { error: "A fork operation ID was reused with different content.", code: "operation_reused" },
+          409,
+        );
+      return json({ dungeon: existing });
+    }
+  }
   if (raw.expectedRevision !== parent.revision)
     return json(
       {
@@ -120,13 +164,6 @@ export async function handleForkDungeon(
       },
       409,
     );
-  const { expectedRevision, ...input } = raw;
-  const parsed = DungeonPatchSchema.omit({
-    roomNotes: true,
-    overview: true,
-  }).safeParse(input);
-  if (!parsed.success) return badRequest(parsed.error.message);
-  const body = parsed.data as Partial<DungeonInput>;
   try {
     const fork = forkDungeon(appDb(), id, {
       ...(typeof body.name === "string" ? { name: body.name } : {}),
@@ -134,6 +171,7 @@ export async function handleForkDungeon(
       config: (body.config ?? null) as never,
       geometry: (body.geometry ?? null) as never,
       blueprint: (body.blueprint ?? null) as never,
+      operationId,
     });
     return fork === null
       ? notFound(`No dungeon ${id}`)
@@ -141,6 +179,53 @@ export async function handleForkDungeon(
   } catch (err) {
     return serverError(err);
   }
+}
+
+export function handleListDungeonRevisions(
+  id: number,
+  query: URLSearchParams = new URLSearchParams(),
+): Response {
+  if (!getDungeon(appDb(), id)) return notFound(`No dungeon ${id}`);
+  const kind = query.get("kind");
+  const roomRaw = query.get("roomIndex");
+  const roomIndex = roomRaw === null ? undefined : Number(roomRaw);
+  if (kind !== null && kind !== "overview" && kind !== "room")
+    return badRequest("kind must be overview or room");
+  if (roomIndex !== undefined && !Number.isInteger(roomIndex))
+    return badRequest("roomIndex must be an integer");
+  return json({
+    revisions: listDungeonRevisions(appDb(), id, {
+      kind: kind as "overview" | "room" | undefined,
+      roomIndex,
+    }),
+  });
+}
+
+export async function handleRestoreDungeonRevision(
+  req: Request,
+  dungeonId: number,
+  revisionId: number,
+): Promise<Response> {
+  const current = getDungeon(appDb(), dungeonId);
+  if (!current) return notFound(`No dungeon ${dungeonId}`);
+  const body = await readJson<Record<string, unknown>>(req);
+  const revision = getDungeonRevision(appDb(), dungeonId, revisionId);
+  if (!revision) return notFound(`No revision ${revisionId}`);
+  if (revision.kind === "room" && revision.roomIndex === null)
+    return badRequest("Room revision is missing its room index");
+  const parsed = MutationSchema.safeParse({
+    expectedRevision: body?.expectedRevision,
+    operationId: body?.operationId,
+    patch:
+      revision.kind === "overview"
+        ? { overview: revision.content }
+        : { roomNotes: [[revision.roomIndex, revision.content]] },
+  });
+  if (!parsed.success) return badRequest(parsed.error.message);
+  return saveMutation(
+    dungeonId,
+    parsed.data as import("../campaign/types.ts").DungeonMutation,
+  );
 }
 
 export async function handlePutRoomNote(

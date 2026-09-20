@@ -24,7 +24,7 @@ export function ChatView({
   const error = useChatStore((s) => s.error);
   const openChat = useChatStore((s) => s.openChat);
   const send = useChatStore((s) => s.send);
-  const truncateFrom = useChatStore((s) => s.truncateFrom);
+  const submitEdit = useChatStore((s) => s.submitEdit);
   const setError = useChatStore((s) => s.setError);
 
   const noteCount = useCampaignStore((s) => s.active?.noteCount ?? 0);
@@ -103,7 +103,7 @@ export function ChatView({
         }
         placeholder="Ask about your notes… (Ctrl+Enter to send)"
         onSend={(text) => void handleSend(text)}
-        onEdit={(index) => void truncateFrom(index)}
+        onEdit={submitEdit}
       />
     </div>
   );

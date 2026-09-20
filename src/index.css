@@ -719,6 +719,31 @@ input:focus, select:focus, textarea:focus {
   padding: 10px 12px;
 }
 
+.config-readout-notice {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--accent);
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 12px;
+}
+
+.chat-editing-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.chat-editing-banner button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
 .config-raw-text {
   font-size: 13px;
   white-space: pre-wrap;
@@ -1779,6 +1804,41 @@ input:focus, select:focus, textarea:focus {
   font-weight: 700;
   color: var(--text);
   margin: 0;
+}
+
+.dungeon-panel-editor,
+.dungeon-panel-history {
+  display: grid;
+  gap: 8px;
+  padding: 8px 16px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.dungeon-panel-editor label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.dungeon-panel-editor input,
+.dungeon-panel-editor textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-surface);
+  color: var(--text);
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.dungeon-panel-history button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  text-align: left;
+  cursor: pointer;
+  padding: 3px 0;
 }
 
 .dungeon-panel-empty {

@@ -135,11 +135,12 @@ export function createDungeon(
 
   db.run(
     `INSERT INTO dungeons
-       (campaign_id, parent_id, name, seed, config, geometry, overview, blueprint, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (campaign_id, parent_id, fork_operation_id, name, seed, config, geometry, overview, blueprint, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       campaignId,
       input.parentId ?? null,
+      input.forkOperationId ?? null,
       name,
       input.seed ?? null,
       input.config == null ? null : JSON.stringify(input.config),
@@ -244,6 +245,7 @@ export function forkDungeon(
     config: DungeonConfig | null;
     geometry: Dungeon | null;
     blueprint?: Blueprint | null;
+    operationId?: string;
   },
 ): DungeonRecord | null {
   const parent = db
@@ -251,14 +253,51 @@ export function forkDungeon(
     .get(parentId) as { campaign_id: number; name: string } | null;
   if (parent === null) return null;
 
-  return createDungeon(db, parent.campaign_id, {
-    name: input.name ?? nextForkName(db, parent.campaign_id, parent.name),
-    seed: input.seed,
-    config: input.config,
-    geometry: input.geometry,
-    blueprint: input.blueprint ?? null,
-    parentId,
-  });
+  if (input.operationId) {
+    const existing = db
+      .query(
+        "SELECT id FROM dungeons WHERE parent_id = ? AND fork_operation_id = ?",
+      )
+      .get(parentId, input.operationId) as { id: number } | null;
+    if (existing !== null) return getDungeon(db, existing.id);
+  }
+
+  try {
+    return createDungeon(db, parent.campaign_id, {
+      name: input.name ?? nextForkName(db, parent.campaign_id, parent.name),
+      seed: input.seed,
+      config: input.config,
+      geometry: input.geometry,
+      blueprint: input.blueprint ?? null,
+      parentId,
+      forkOperationId: input.operationId ?? null,
+    });
+  } catch (error) {
+    // Two browser retries can race between the lookup and INSERT. The unique
+    // receipt index turns that race into the same safe replay as a lost ACK.
+    if (input.operationId) {
+      const existing = db
+        .query(
+          "SELECT id FROM dungeons WHERE parent_id = ? AND fork_operation_id = ?",
+        )
+        .get(parentId, input.operationId) as { id: number } | null;
+      if (existing !== null) return getDungeon(db, existing.id);
+    }
+    throw error;
+  }
+}
+
+export function getForkByOperation(
+  db: Database,
+  parentId: number,
+  operationId: string,
+): DungeonRecord | null {
+  const row = db
+    .query(
+      "SELECT id FROM dungeons WHERE parent_id = ? AND fork_operation_id = ?",
+    )
+    .get(parentId, operationId) as { id: number } | null;
+  return row === null ? null : getDungeon(db, row.id);
 }
 
 /**

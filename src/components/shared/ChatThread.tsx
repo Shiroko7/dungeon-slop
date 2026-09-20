@@ -13,7 +13,7 @@ interface ChatThreadProps {
   placeholder: string;
   onSend: (text: string) => void;
   /** Absent when a thread cannot be edited and resent. */
-  onEdit?: (index: number, content: string) => void;
+  onEdit?: (index: number, content: string) => void | Promise<boolean | void>;
   disabled?: boolean;
   /** Rendered under the last message — the Architect hangs its config card here. */
   footer?: React.ReactNode;
@@ -42,6 +42,8 @@ export function ChatThread({
   hint,
 }: ChatThreadProps) {
   const [draft, setDraft] = useState("");
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,6 +53,17 @@ export function ChatThread({
   const submit = (): void => {
     const trimmed = draft.trim();
     if (trimmed === "" || isBusy || disabled) return;
+    if (editingIndex !== null && onEdit !== undefined) {
+      setEditBusy(true);
+      void Promise.resolve(onEdit(editingIndex, trimmed)).then((ok) => {
+        setEditBusy(false);
+        if (ok !== false) {
+          setDraft("");
+          setEditingIndex(null);
+        }
+      });
+      return;
+    }
     setDraft("");
     onSend(trimmed);
   };
@@ -89,9 +102,9 @@ export function ChatThread({
                   className="chat-msg-edit-btn"
                   onClick={() => {
                     setDraft(msg.content);
-                    onEdit(i, msg.content);
+                    setEditingIndex(i);
                   }}
-                  disabled={isBusy}
+                  disabled={isBusy || editBusy}
                   title="Edit and resend"
                 >
                   Edit
@@ -122,6 +135,14 @@ export function ChatThread({
 
       <div className="chat-compose">
         {hint}
+        {editingIndex !== null && (
+          <div className="chat-editing-banner">
+            Editing this message — the thread will change when you submit.
+            <button type="button" onClick={() => { setEditingIndex(null); setDraft(""); }}>
+              Cancel
+            </button>
+          </div>
+        )}
         <div className="chat-compose-inner">
           <textarea
             className="chat-textarea"
@@ -132,12 +153,12 @@ export function ChatThread({
             }}
             placeholder={placeholder}
             rows={3}
-            disabled={isBusy || disabled}
+            disabled={isBusy || disabled || editBusy}
           />
           <button
             className="chat-send-btn"
             onClick={submit}
-            disabled={draft.trim() === "" || isBusy || disabled}
+            disabled={draft.trim() === "" || isBusy || disabled || editBusy}
             title="Send (Ctrl+Enter)"
           >
             {isBusy ? <LoadingSpinner size={14} /> : "↑"}

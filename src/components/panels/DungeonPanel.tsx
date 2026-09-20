@@ -1,5 +1,12 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
+import { api } from "../../store/api.ts";
+import {
+  clearOverviewDraft,
+  getOverviewDraft,
+  saveOverviewDraft,
+} from "../../store/content-drafts.ts";
+import type { DungeonDescription } from "../../engine/types.ts";
 import { Button } from "../shared/Button.tsx";
 
 export function DungeonPanel() {
@@ -7,11 +14,41 @@ export function DungeonPanel() {
   const dungeonDescription = useDungeonStore((s) => s.dungeonDescription);
   const isDescribingDungeon = useDungeonStore((s) => s.isDescribingDungeon);
   const describeDungeon = useDungeonStore((s) => s.describeDungeon);
+  const dungeonId = useDungeonStore((s) => s.dungeonId);
+  const setDungeonDescription = useDungeonStore((s) => s.setDungeonDescription);
+  const restoreRevision = useDungeonStore((s) => s.restoreRevision);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<DungeonDescription | null>(null);
+  const [revisions, setRevisions] = useState<Awaited<ReturnType<typeof api.dungeons.revisions>>>([]);
 
   const handleDescribe = useCallback(() => {
     if (!dungeon || isDescribingDungeon) return;
     describeDungeon();
   }, [dungeon, isDescribingDungeon, describeDungeon]);
+
+  const startEdit = () => {
+    setDraft(getOverviewDraft(dungeonId) ?? dungeonDescription ?? {
+      history: "", corridorFeatures: [], wanderingMonsters: [],
+    });
+    setEditing(true);
+  };
+  const updateDraft = (patch: Partial<DungeonDescription>) => {
+    setDraft((previous) => {
+      const next = { ...(previous ?? { history: "", corridorFeatures: [], wanderingMonsters: [] }), ...patch };
+      saveOverviewDraft(dungeonId, next);
+      return next;
+    });
+  };
+  const saveEdit = () => {
+    if (!draft) return;
+    setDungeonDescription(draft);
+    clearOverviewDraft(dungeonId);
+    setEditing(false);
+  };
+  const loadHistory = async () => {
+    if (dungeonId === null) return;
+    setRevisions(await api.dungeons.revisions(dungeonId, { kind: "overview" }));
+  };
 
   if (!dungeon) {
     return (
@@ -35,7 +72,30 @@ export function DungeonPanel() {
         >
           {isDescribingDungeon ? "Generating..." : d ? "Regenerate" : "Generate"}
         </Button>
+        <Button variant="secondary" size="sm" onClick={startEdit}>Edit</Button>
+        <Button variant="secondary" size="sm" onClick={() => void loadHistory()}>History</Button>
       </div>
+
+      {editing && draft && (
+        <div className="dungeon-panel-editor">
+          <label>History<textarea value={draft.history} rows={5} onChange={(e) => updateDraft({ history: e.target.value })} /></label>
+          {(["size", "walls", "floor", "temperature", "illumination"] as const).map((field) => (
+            <label key={field}>{field}<input value={draft[field] ?? ""} onChange={(e) => updateDraft({ [field]: e.target.value } as Partial<DungeonDescription>)} /></label>
+          ))}
+          <div><Button variant="primary" size="sm" onClick={saveEdit}>Save</Button>{" "}<Button variant="secondary" size="sm" onClick={() => setEditing(false)}>Cancel</Button></div>
+        </div>
+      )}
+
+      {revisions.length > 0 && (
+        <div className="dungeon-panel-history">
+          <strong>Previous versions</strong>
+          {revisions.slice(0, 5).map((revision) => (
+            <button key={revision.id} onClick={() => void restoreRevision(revision.id)}>
+              {new Date(revision.createdAt).toLocaleString()} — Restore
+            </button>
+          ))}
+        </div>
+      )}
 
       {!d && !isDescribingDungeon && (
         <p className="dungeon-panel-empty">

@@ -51,15 +51,20 @@ interface DungeonState {
 
   // Content
   config: DungeonConfig | null;
+  /** AI output that has not been applied to a map yet. */
+  proposedConfig: DungeonConfig | null;
   dungeon: Dungeon | null;
   /** The floor plan driving the layout, when the Architect designed one. */
   blueprint: Blueprint | null;
+  proposedBlueprint: Blueprint | null;
   blueprintProblems: BlueprintProblem[];
   /** Pending refinement, awaiting the user's accept or discard. */
   refinement: Refinement | null;
   isRefining: boolean;
   roomDescriptions: Map<number, RoomDescription>;
   dungeonDescription: DungeonDescription | null;
+  missingRoomIds: number[];
+  pendingForkOperationId: string | null;
 
   // Loading/streaming
   isLoading: boolean;
@@ -91,6 +96,7 @@ interface DungeonState {
 
   setError: (error: string | null) => void;
   setConfig: (config: DungeonConfig) => void;
+  setProposedConfig: (config: DungeonConfig | null) => void;
   setDungeon: (dungeon: Dungeon) => void;
   setRoomDescription: (roomId: number, desc: RoomDescription) => void;
   clearRoomDescription: (roomId: number) => Promise<void>;
@@ -103,6 +109,7 @@ interface DungeonState {
   setIsDescribingRooms: (v: boolean) => void;
 
   setBlueprint: (blueprint: Blueprint | null) => void;
+  setProposedBlueprint: (blueprint: Blueprint | null) => void;
   /** Send the plan (and a render of the map) for critique. Applies nothing. */
   refineLayout: (instruction?: string) => Promise<void>;
   /** Adopt the pending refinement and rebuild the map from it. */
@@ -116,7 +123,8 @@ interface DungeonState {
   /** Returns a forked dungeon when the described original had to be preserved. */
   generateDungeonFromConfig: () => Promise<DungeonRecord | null>;
   rerollDungeon: (seed?: number) => Promise<DungeonRecord | null>;
-  describeRooms: () => Promise<boolean>;
+  restoreRevision: (revisionId: number) => Promise<boolean>;
+  describeRooms: (roomIds?: number[]) => Promise<boolean>;
   describeRoom: (roomId: number) => Promise<void>;
   describeDungeon: () => Promise<void>;
 
@@ -254,12 +262,16 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
   campaignId: null,
   name: "",
   config: null,
+  proposedConfig: null,
   dungeon: null,
   blueprint: null,
+  proposedBlueprint: null,
   blueprintProblems: [],
   refinement: null,
   roomDescriptions: new Map<number, RoomDescription>(),
   dungeonDescription: null,
+  missingRoomIds: [],
+  pendingForkOperationId: null,
   _undoStack: [] as Dungeon[],
   _redoStack: [] as Dungeon[],
   ...transientDefaults,
@@ -278,12 +290,16 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       campaignId: null,
       name: "",
       config: null,
+      proposedConfig: null,
       dungeon: null,
       blueprint: null,
+      proposedBlueprint: null,
       refinement: null,
       blueprintProblems: [],
       roomDescriptions: new Map(),
       dungeonDescription: null,
+      missingRoomIds: [],
+      pendingForkOperationId: null,
       _undoStack: [],
       _redoStack: [],
     });
@@ -296,10 +312,14 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
         campaignId: record.campaignId,
         name: record.name,
         config: record.config,
+        proposedConfig: null,
         dungeon: record.geometry,
         blueprint: record.blueprint,
+        proposedBlueprint: null,
         dungeonDescription: record.overview,
         roomDescriptions: new Map(record.roomNotes),
+        missingRoomIds: [],
+        pendingForkOperationId: null,
         error: null,
       });
     } catch (err) {
@@ -322,12 +342,16 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       campaignId: null,
       name: "",
       config: null,
+      proposedConfig: null,
       dungeon: null,
       blueprint: null,
+      proposedBlueprint: null,
       blueprintProblems: [],
       refinement: null,
       dungeonDescription: null,
       roomDescriptions: new Map(),
+      missingRoomIds: [],
+      pendingForkOperationId: null,
       _undoStack: [],
       _redoStack: [],
       ...transientDefaults,
@@ -343,6 +367,11 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
   setConfig: (config) => {
     set({ config });
     queueSave(get().dungeonId, { config, seed: config.seed ?? null });
+  },
+
+  setProposedConfig: (proposedConfig) => {
+    if (!applyingOperation) dungeonOperations.cancel();
+    set({ proposedConfig });
   },
 
   setDungeon: (dungeon) => {
@@ -386,6 +415,11 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
     queueSave(get().dungeonId, { blueprint });
   },
 
+  setProposedBlueprint: (proposedBlueprint) => {
+    if (!applyingOperation) dungeonOperations.cancel();
+    set({ proposedBlueprint, blueprintProblems: [] });
+  },
+
   /*
    * Ask the Architect for the floor plan, not the geometry.
    *
@@ -395,6 +429,8 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
    * always good at it.
    */
   generateBlueprint: async (prompt, sharedOperation) => {
+    const candidateConfig = get().proposedConfig ?? get().config;
+    if (candidateConfig === null) return null;
     const operation = sharedOperation ?? beginDungeonOperation();
     set({ isGeneratingBlueprint: true, error: null, blueprintProblems: [] });
     try {
@@ -402,17 +438,16 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       let blueprint: Blueprint | null = null;
       for await (const parsed of events(
         "/api/generate-blueprint",
-        { prompt, config: get().config, ...ctx },
+        { prompt, config: candidateConfig, ...ctx },
         operation,
       )) {
         if (parsed.blueprint) {
           blueprint = parsed.blueprint as Blueprint;
           operation.commit(() => {
             set({
-              blueprint,
+              proposedBlueprint: blueprint,
               blueprintProblems: (parsed.problems as BlueprintProblem[]) ?? [],
             });
-            queueSave(operation.dungeonId, { blueprint });
           });
         }
       }
@@ -438,10 +473,10 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
    * picture and invisible in the graph.
    */
   refineLayout: async (instruction) => {
-    const { dungeon, blueprint } = get();
+    const { dungeon, blueprint: appliedBlueprint, proposedBlueprint } = get();
     if (!dungeon) return;
     const operation = beginDungeonOperation();
-    const plan = blueprint ?? blueprintFromDungeon(dungeon);
+    const plan = proposedBlueprint ?? appliedBlueprint ?? blueprintFromDungeon(dungeon);
     set({ isRefining: true, error: null, refinement: null });
     try {
       const ctx = await prepareAI(operation);
@@ -479,15 +514,15 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
   },
 
   acceptRefinement: async () => {
-    const { refinement, config } = get();
+    const { refinement, config: appliedConfig, proposedConfig } = get();
+    const config = proposedConfig ?? appliedConfig;
     if (refinement === null || config === null) return null;
 
     set({
-      blueprint: refinement.blueprint,
+      proposedBlueprint: refinement.blueprint,
       blueprintProblems: [],
       refinement: null,
     });
-    queueSave(get().dungeonId, { blueprint: refinement.blueprint });
 
     // A refined plan is a different dungeon, so it gets a fresh seed rather
     // than reusing one whose placement was solved for the old room set.
@@ -501,7 +536,8 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
   },
 
   generateDungeonFromConfig: async () => {
-    const { config, dungeonId } = get();
+    const { config: appliedConfig, proposedConfig, dungeonId } = get();
+    const config = proposedConfig ?? appliedConfig;
     if (config === null) return null;
     const epoch = loadEpoch;
     const result = await applyGeneratedGeometry(config, set, get);
@@ -530,12 +566,41 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
    * already written against it — instead the reroll lands as a sibling.
    */
   rerollDungeon: async (seed?: number) => {
-    const { config } = get();
+    const { config: appliedConfig, proposedConfig } = get();
+    const config = proposedConfig ?? appliedConfig;
     if (config === null) return null;
     const newSeed = seed ?? Math.floor(Math.random() * 2147483647);
     return (
       await applyGeneratedGeometry({ ...config, seed: newSeed }, set, get)
     ).fork;
+  },
+
+  restoreRevision: async (revisionId) => {
+    const { dungeonId } = get();
+    if (dungeonId === null) return false;
+    try {
+      const result = await api.dungeons.restoreRevision(dungeonId, revisionId, {
+        expectedRevision: dungeonSaves.revision(dungeonId),
+        operationId: crypto.randomUUID(),
+      });
+      if (get().dungeonId !== dungeonId) return false;
+      const record = dungeonSaves.attach(result.dungeon);
+      set({
+        config: record.config,
+        dungeon: record.geometry,
+        blueprint: record.blueprint,
+        proposedConfig: null,
+        proposedBlueprint: null,
+        dungeonDescription: record.overview,
+        roomDescriptions: new Map(record.roomNotes),
+        error: null,
+      });
+      return true;
+    } catch (err) {
+      if (get().dungeonId === dungeonId)
+        set({ error: err instanceof Error ? err.message : "Could not restore revision" });
+      return false;
+    }
   },
 
   /*
@@ -546,21 +611,26 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
    * fifty. Batching also reads better: the model sees a group at once, so it
    * varies them against each other instead of writing each in isolation.
    */
-  describeRooms: async () => {
+  describeRooms: async (requestedRoomIds) => {
     const { dungeon, config } = get();
     if (!dungeon || !config) return false;
+    const requested = requestedRoomIds
+      ? dungeon.rooms.filter((room) => requestedRoomIds.includes(room.id))
+      : dungeon.rooms;
+    if (requested.length === 0) return true;
     const operation = beginDungeonOperation();
-    set({ isDescribingRooms: true, error: null });
+    set({ isDescribingRooms: true, error: null, missingRoomIds: [] });
     try {
-      for (let i = 0; i < dungeon.rooms.length; i += DESCRIBE_BATCH_SIZE) {
-        const batch = dungeon.rooms.slice(i, i + DESCRIBE_BATCH_SIZE);
+      const missing = new Set<number>();
+      for (let i = 0; i < requested.length; i += DESCRIBE_BATCH_SIZE) {
+        const batch = requested.slice(i, i + DESCRIBE_BATCH_SIZE);
         const ctx = await prepareAI(operation);
         let streamingText = "";
         const roomName = `Rooms ${batch.map((r) => r.id).join(", ")}`;
         set({
           describeProgress: {
             current: i,
-            total: dungeon.rooms.length,
+            total: requested.length,
             roomName,
             streamingText,
           },
@@ -581,7 +651,7 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
             set({
               describeProgress: {
                 current: i,
-                total: dungeon.rooms.length,
+                total: requested.length,
                 roomName,
                 streamingText,
               },
@@ -589,16 +659,22 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
           }
           if (Array.isArray(parsed.descriptions))
             operation.commit(() => {
-              batch.forEach((room, index) => {
-                const description = (parsed.descriptions as RoomDescription[])[
-                  index
-                ];
-                if (description) get().setRoomDescription(room.id, description);
-              });
+              for (const result of parsed.descriptions as Array<{
+                roomId?: number;
+                description?: RoomDescription;
+              }>) {
+                if (typeof result.roomId === "number" && result.description)
+                  get().setRoomDescription(result.roomId, result.description);
+              }
             });
+          if (Array.isArray(parsed.missingRoomIds))
+            for (const roomId of parsed.missingRoomIds)
+              if (typeof roomId === "number") missing.add(roomId);
         }
       }
-      return true;
+      if (!operation.valid()) return false;
+      set({ missingRoomIds: [...missing] });
+      return missing.size === 0;
     } catch (err) {
       operationError(operation, err);
       return false;
@@ -635,11 +711,15 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
         },
         operation,
       )) {
-        if (parsed.description)
+        const result = parsed.description as
+          | { roomId?: number; description?: RoomDescription }
+          | null
+          | undefined;
+        if (result && typeof result.roomId === "number" && result.description)
           operation.commit(() =>
             get().setRoomDescription(
-              roomId,
-              parsed.description as RoomDescription,
+              result.roomId!,
+              result.description!,
             ),
           );
       }
@@ -797,7 +877,16 @@ async function applyGeneratedGeometry(
   set: (partial: Partial<DungeonState>) => void,
   get: () => DungeonState,
 ): Promise<{ ok: boolean; fork: DungeonRecord | null }> {
-  const { dungeonId, roomDescriptions, blueprint } = get();
+  const {
+    dungeonId,
+    roomDescriptions,
+    dungeonDescription,
+    dungeon,
+    blueprint: appliedBlueprint,
+    proposedBlueprint,
+    pendingForkOperationId,
+  } = get();
+  const blueprint = proposedBlueprint ?? appliedBlueprint;
   const operation = beginDungeonOperation();
   set({ isGeneratingDungeon: true, error: null });
   try {
@@ -811,21 +900,33 @@ async function applyGeneratedGeometry(
     if (!res.ok) throw new Error(`Server responded with ${res.status}`);
     const data = (await res.json()) as { dungeon: Dungeon };
     operation.assert();
-    if (dungeonId !== null && roomDescriptions.size > 0) {
+    const existingRevision =
+      dungeonId === null ? 0 : dungeonSaves.revision(dungeonId);
+    const shouldFork =
+      dungeonId !== null &&
+      (roomDescriptions.size > 0 || dungeonDescription !== null || existingRevision > 0 || dungeon !== null);
+    if (shouldFork) {
+      const operationId = pendingForkOperationId ?? crypto.randomUUID();
+      set({ pendingForkOperationId: operationId });
       const fork = await api.dungeons.fork(dungeonId, {
         seed: config.seed ?? null,
         config,
         geometry: data.dungeon,
         blueprint,
         expectedRevision: dungeonSaves.revision(dungeonId),
+        operationId,
       });
       operation.assert();
+      set({ pendingForkOperationId: null });
       return { ok: true, fork };
     }
     operation.commit(() => {
       set({
         config,
+        proposedConfig: null,
         dungeon: data.dungeon,
+        blueprint,
+        proposedBlueprint: null,
         roomDescriptions: new Map(),
         dungeonDescription: null,
         _undoStack: [],

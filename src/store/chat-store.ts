@@ -26,6 +26,8 @@ interface ChatState {
     citations?: Citation[] | null,
   ) => Promise<void>;
   truncateFrom: (index: number) => Promise<void>;
+  /** Replace an edited user turn atomically; the local transcript changes only after ACK. */
+  submitEdit: (index: number, content: string) => Promise<boolean>;
 
   setStreaming: (value: boolean) => void;
   setStreamingText: (text: string) => void;
@@ -184,6 +186,26 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       update({ chat: { ...chat, messages }, error: null });
     } catch (err) {
       update({ error: message(err, "Could not edit that message") });
+    }
+  },
+
+  submitEdit: async (index, content) => {
+    const epoch = ++chatEpoch;
+    const chat = get().chat;
+    if (chat === null || index < 0 || index >= chat.messages.length) return false;
+    const inputs = [
+      ...chat.messages.slice(0, index),
+      { role: "user" as const, content, citations: null },
+    ];
+    try {
+      const messages = await api.chats.replace(chat.id, inputs);
+      if (epoch !== chatEpoch) return false;
+      set({ chat: { ...chat, messages }, error: null });
+      return true;
+    } catch (err) {
+      if (epoch === chatEpoch)
+        set({ error: message(err, "Could not save that edit") });
+      return false;
     }
   },
 }));

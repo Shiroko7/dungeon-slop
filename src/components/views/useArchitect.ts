@@ -74,7 +74,7 @@ export async function runArchitect(text: string): Promise<void> {
           throw new Error("The Architect returned an invalid config.");
         gotConfig = true;
         operation.commit(() =>
-          useDungeonStore.getState().setConfig(result.data),
+          useDungeonStore.getState().setProposedConfig(result.data),
         );
         await useChatStore
           .getState()

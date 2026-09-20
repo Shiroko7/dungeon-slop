@@ -210,8 +210,9 @@ function ConfigField({ fieldKey, label, config, onChange }: ConfigFieldProps) {
 }
 
 export function ConfigReadout() {
-  const config = useDungeonStore((s) => s.config);
-  const setConfig = useDungeonStore((s) => s.setConfig);
+  const appliedConfig = useDungeonStore((s) => s.config);
+  const proposedConfig = useDungeonStore((s) => s.proposedConfig);
+  const setProposedConfig = useDungeonStore((s) => s.setProposedConfig);
   const configRawText = useDungeonStore((s) => s.configRawText);
   const isGeneratingConfig = useDungeonStore((s) => s.isGeneratingConfig);
 
@@ -223,6 +224,7 @@ export function ConfigReadout() {
     );
   }
 
+  const config = proposedConfig ?? appliedConfig;
   if (!config) {
     return (
       <div className="config-readout config-readout--empty">
@@ -234,11 +236,12 @@ export function ConfigReadout() {
   }
 
   const handleChange = (key: keyof DungeonConfig, value: DungeonConfig[keyof DungeonConfig]) => {
-    setConfig({ ...config, [key]: value });
+    setProposedConfig({ ...config, [key]: value });
   };
 
   return (
     <div className="config-readout">
+      {proposedConfig && <p className="config-readout-notice">Proposed changes — Generate to apply as a new version.</p>}
       {(Object.keys(CONFIG_LABELS) as Array<keyof DungeonConfig>)
         .filter((key) => {
           if (key === "room_count" && config.room_density !== "Exact") return false;

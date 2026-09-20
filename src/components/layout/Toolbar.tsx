@@ -9,7 +9,7 @@ import { Button } from "../shared/Button.tsx";
 const ZOOM_BTN_FACTOR = 1.2;
 
 export function Toolbar() {
-  const config = useDungeonStore((s) => s.config);
+  const config = useDungeonStore((s) => s.proposedConfig ?? s.config);
   const dungeon = useDungeonStore((s) => s.dungeon);
   const isGeneratingDungeon = useDungeonStore((s) => s.isGeneratingDungeon);
   const generateDungeonFromConfig = useDungeonStore(

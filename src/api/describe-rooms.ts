@@ -11,6 +11,7 @@ import type { Room, Corridor } from "../engine/types.ts";
 import type { DungeonConfig } from "../ai/schema.ts";
 import type { RoomDescription } from "../engine/types.ts";
 import type { AIMessage } from "../ai/types.ts";
+import { NarratorRoomResultSchema } from "./mutation-schema.ts";
 
 interface DescribeRoomsBody {
   rooms: Room[];
@@ -154,14 +155,45 @@ export async function handleDescribeRooms(req: Request): Promise<Response> {
       }
 
       const obj = parsed as Record<string, unknown>;
-      const descriptions = (obj.rooms ??
-        obj.descriptions ??
-        parsed) as RoomDescription[];
+      const candidates = (obj.rooms ?? obj.descriptions ?? parsed) as unknown;
+      const requested = new Set(rooms.map((room) => room.id));
+      const seen = new Set<number>();
+      const descriptions: Array<{ roomId: number; description: RoomDescription }> = [];
+      const invalidRoomIds: number[] = [];
+      if (Array.isArray(candidates)) {
+        for (const candidate of candidates) {
+          const value = candidate as Record<string, unknown>;
+          const roomId = value?.roomId;
+          const nested = value?.description;
+          const descriptionValue =
+            nested && typeof nested === "object"
+              ? nested
+              : (() => {
+                  if (!value || typeof value !== "object") return null;
+                  const copy = { ...value };
+                  delete copy.roomId;
+                  return copy;
+                })();
+          const valid = NarratorRoomResultSchema.safeParse({
+            roomId,
+            description: descriptionValue,
+          });
+          if (!valid.success || !requested.has(Number(roomId)) || seen.has(Number(roomId))) {
+            if (Number.isInteger(roomId)) invalidRoomIds.push(Number(roomId));
+            continue;
+          }
+          seen.add(Number(roomId));
+          descriptions.push(valid.data);
+        }
+      }
+      const missingRoomIds = [...requested].filter((id) => !seen.has(id));
 
       controller.enqueue(
         encoder.encode(
           sseEvent("complete", {
-            descriptions: Array.isArray(descriptions) ? descriptions : [],
+            descriptions,
+            missingRoomIds,
+            invalidRoomIds,
             usage: result?.usage,
             model: result?.model ?? modelName,
           }),
@@ -296,17 +328,30 @@ export async function handleDescribeRoom(
       }
 
       const obj = parsed as Record<string, unknown>;
-      const descriptions = (obj.rooms ??
-        obj.descriptions ??
-        parsed) as RoomDescription[];
-      const description = Array.isArray(descriptions)
-        ? descriptions[0]
-        : descriptions;
+      const candidates = (obj.rooms ?? obj.descriptions ?? [parsed]) as unknown;
+      const candidate = Array.isArray(candidates) ? candidates[0] : candidates;
+      const value = (candidate ?? {}) as Record<string, unknown>;
+      const nested = value.description;
+      const descriptionValue =
+        nested && typeof nested === "object"
+          ? nested
+          : (() => {
+              const copy = { ...value };
+              delete copy.roomId;
+              return copy;
+            })();
+      const valid = NarratorRoomResultSchema.safeParse({
+        roomId: value.roomId,
+        description: descriptionValue,
+      });
 
       controller.enqueue(
         encoder.encode(
           sseEvent("complete", {
-            description: description ?? null,
+            description:
+              valid.success && valid.data.roomId === Number(roomId)
+                ? valid.data
+                : null,
             usage: result?.usage,
             model: result?.model ?? modelName,
           }),
