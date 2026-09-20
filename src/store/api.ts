@@ -8,6 +8,7 @@ import type {
   DungeonInput,
   DungeonMutation,
   DungeonRecord,
+  DungeonRevision,
   DungeonSummary,
   MessageInput,
 } from "../campaign/types.ts";
@@ -124,6 +125,7 @@ export const api = {
       id: number,
       input: {
         expectedRevision: number;
+        operationId: string;
         seed: number | null;
         config: DungeonConfig | null;
         geometry: Dungeon | null;
@@ -134,6 +136,24 @@ export const api = {
         `/api/dungeons/${id}/fork`,
         postJson(input),
       ).then((r) => r.dungeon),
+    revisions: (id: number, options: { kind?: "overview" | "room"; roomIndex?: number } = {}) => {
+      const query = new URLSearchParams();
+      if (options.kind) query.set("kind", options.kind);
+      if (options.roomIndex !== undefined) query.set("roomIndex", String(options.roomIndex));
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      return request<{ revisions: DungeonRevision[] }>(
+        `/api/dungeons/${id}/revisions${suffix}`,
+      ).then((r) => r.revisions);
+    },
+    restoreRevision: (
+      id: number,
+      revisionId: number,
+      mutation: { expectedRevision: number; operationId: string },
+    ) =>
+      request<{ revision: number; dungeon: DungeonRecord }>(
+        `/api/dungeons/${id}/revisions/${revisionId}/restore`,
+        postJson(mutation),
+      ),
     architectChat: (dungeonId: number) =>
       request<{ chat: ChatRecord }>(
         `/api/dungeons/${dungeonId}/chat`,

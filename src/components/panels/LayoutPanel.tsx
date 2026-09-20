@@ -33,7 +33,9 @@ function feet(cells: number): string {
  */
 export function LayoutPanel() {
   const dungeon = useDungeonStore((s) => s.dungeon);
-  const blueprint = useDungeonStore((s) => s.blueprint);
+  const appliedBlueprint = useDungeonStore((s) => s.blueprint);
+  const proposedBlueprint = useDungeonStore((s) => s.proposedBlueprint);
+  const blueprint = proposedBlueprint ?? appliedBlueprint;
   const problems = useDungeonStore((s) => s.blueprintProblems);
   const refinement = useDungeonStore((s) => s.refinement);
   const isRefining = useDungeonStore((s) => s.isRefining);
@@ -71,8 +73,12 @@ export function LayoutPanel() {
     <div className="layout-panel">
       <div className="layout-panel-header">
         <h3 className="layout-panel-heading">Layout</h3>
-        {blueprint !== null && <span className="layout-badge">planned</span>}
+        {blueprint !== null && <span className="layout-badge">{proposedBlueprint ? "proposed" : "planned"}</span>}
       </div>
+
+      {proposedBlueprint !== null && (
+        <p className="layout-notice">This floor plan is proposed and unapplied. Generate to create a new version.</p>
+      )}
 
       {report !== undefined && (
         <dl className="layout-stats">

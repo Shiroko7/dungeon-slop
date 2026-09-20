@@ -55,10 +55,10 @@ function RoomsTab({ campaignId, dungeonId }: { campaignId: number; dungeonId: nu
 
 function ArchitectTab({ campaignId, dungeonId }: { campaignId: number; dungeonId: number }) {
   const chat = useChatStore((s) => s.chat);
-  const truncateFrom = useChatStore((s) => s.truncateFrom);
+  const submitEdit = useChatStore((s) => s.submitEdit);
   const isGeneratingConfig = useDungeonStore((s) => s.isGeneratingConfig);
   const configRawText = useDungeonStore((s) => s.configRawText);
-  const config = useDungeonStore((s) => s.config);
+  const config = useDungeonStore((s) => s.proposedConfig ?? s.config);
   const clarification = useDungeonStore((s) => s.clarificationQuestion);
   const refreshContents = useCampaignStore((s) => s.refreshContents);
 
@@ -76,7 +76,7 @@ function ArchitectTab({ campaignId, dungeonId }: { campaignId: number; dungeonId
       emptyHint="A flooded crypt under a salt marsh, twelve rooms, one secret vault."
       placeholder={clarification !== null ? "Type your reply…" : "Describe your dungeon… (Ctrl+Enter)"}
       onSend={(text) => void ask(text).then(() => refreshContents(campaignId))}
-      onEdit={(index) => void truncateFrom(index)}
+      onEdit={submitEdit}
       disabled={!isArchitectThread}
       footer={
         config !== null && !isGeneratingConfig ? (

@@ -24,6 +24,8 @@ import {
   handleForkDungeon,
   handleGetDungeon,
   handleListDungeons,
+  handleListDungeonRevisions,
+  handleRestoreDungeonRevision,
   handlePutRoomNote,
   handleUpdateDungeon,
 } from "./dungeons.ts";
@@ -136,6 +138,18 @@ const routes: Route[] = [
     method: "POST",
     pattern: /^\/api\/dungeons\/(\d+)\/fork$/,
     handle: (req, [id]) => handleForkDungeon(req, id!),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/dungeons\/(\d+)\/revisions$/,
+    handle: (req, [id]) =>
+      handleListDungeonRevisions(id!, new URL(req.url).searchParams),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/dungeons\/(\d+)\/revisions\/(\d+)\/restore$/,
+    handle: (req, [id, revision]) =>
+      handleRestoreDungeonRevision(req, id!, revision!),
   },
   {
     method: "POST",

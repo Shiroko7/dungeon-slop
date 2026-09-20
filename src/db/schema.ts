@@ -11,7 +11,7 @@
  * the v1 `documents` table, which predates campaigns — live in `migrate.ts` and
  * run first.
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS dungeons (
   revision    INTEGER NOT NULL DEFAULT 0,
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   parent_id   INTEGER          REFERENCES dungeons(id) ON DELETE SET NULL,
+  fork_operation_id TEXT,
   name        TEXT    NOT NULL,
   seed        INTEGER,
   config      TEXT,
@@ -115,6 +116,9 @@ CREATE TABLE IF NOT EXISTS dungeons (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dungeons_campaign ON dungeons (campaign_id, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dungeons_fork_operation
+  ON dungeons (parent_id, fork_operation_id)
+  WHERE fork_operation_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS dungeon_mutations (
   dungeon_id INTEGER NOT NULL REFERENCES dungeons(id) ON DELETE CASCADE,
@@ -132,6 +136,19 @@ CREATE TABLE IF NOT EXISTS room_notes (
   updated_at  INTEGER NOT NULL,
   PRIMARY KEY (dungeon_id, room_index)
 );
+
+CREATE TABLE IF NOT EXISTS authored_revisions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  dungeon_id  INTEGER NOT NULL REFERENCES dungeons(id) ON DELETE CASCADE,
+  kind        TEXT    NOT NULL CHECK (kind IN ('overview', 'room')),
+  room_index  INTEGER,
+  content     TEXT    NOT NULL,
+  source      TEXT    NOT NULL DEFAULT 'before-replace',
+  created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_authored_revisions_dungeon
+  ON authored_revisions (dungeon_id, created_at DESC);
 
 -- ─── chats ──────────────────────────────────────────────────────────────────
 

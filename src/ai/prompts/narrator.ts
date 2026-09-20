@@ -48,6 +48,8 @@ interface NarratorRoomInput {
 }
 
 export interface NarratorRoomOutput {
+  roomId: number;
+  description: {
   name: string;
   entries?: Array<{ direction: string; doorType: string; leadsTo: string; trap?: string }>;
   features?: string;
@@ -58,6 +60,7 @@ export interface NarratorRoomOutput {
   tricks?: string[];
   notes?: string;
   empty?: boolean;
+  };
 }
 
 export const NARRATOR_SYSTEM_PROMPT = `You are the Dungeon Narrator. Generate structured, gameable room descriptions in classic tabletop RPG style (5e compatible).
@@ -79,7 +82,7 @@ You receive a JSON object with:
 - "config": dungeon configuration (motif, theme_description, etc.)
 - "source"?: the request this dungeon was built from, and the conversation around it. When present it is the strongest signal you have: it names the specific place being reproduced.
 
-Respond with a JSON array, one object per room in the same order. Each object must have:
+Respond with a JSON array of objects, one per room. Every object MUST have a numeric "roomId" copied from the input and a nested "description" object. Never rely on array position: roomId is the only identity. Each description object must have:
 - "name": short evocative room name (2-5 words), matching the motif
 - "entries": array, one per input entry, each with:
   - "direction": same as input

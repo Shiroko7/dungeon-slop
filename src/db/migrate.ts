@@ -177,6 +177,12 @@ export function runMigrations(db: Database): MigrationReport {
       "ALTER TABLE dungeons ADD COLUMN revision INTEGER NOT NULL DEFAULT 0",
     );
   }
+  if (
+    tableExists(db, "dungeons") &&
+    !columnNames(db, "dungeons").includes("fork_operation_id")
+  ) {
+    db.run("ALTER TABLE dungeons ADD COLUMN fork_operation_id TEXT");
+  }
 
   return { from, to: SCHEMA_VERSION, documentsAdopted };
 }

@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import type { DungeonMutation } from "./types.ts";
 import { getDungeon, updateDungeon } from "./dungeons.ts";
+import { checkpointAuthoredContent } from "./revisions.ts";
 
 export class MutationError extends Error {
   constructor(
@@ -81,6 +82,7 @@ export function commitDungeon(
         );
       }
     }
+    checkpointAuthoredContent(db, id, current, mutation.patch);
     const saved = updateDungeon(db, id, mutation.patch)!;
     db.run("INSERT INTO dungeon_mutations VALUES (?, ?, ?, ?)", [
       id,

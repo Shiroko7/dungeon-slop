@@ -45,6 +45,11 @@ export const RoomDescriptionSchema = z
     empty: z.boolean().optional(),
   })
   .strict();
+/** Stable narrator result: room identity travels with its content. */
+export const NarratorRoomResultSchema = z.object({
+  roomId: id,
+  description: RoomDescriptionSchema,
+});
 export const RoomSchema = point
   .extend({
     id,

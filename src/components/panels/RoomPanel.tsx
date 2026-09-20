@@ -1,10 +1,18 @@
 import { roomName } from "../../engine/room-name.ts";
 import { useState, useCallback } from "react";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
+import { api } from "../../store/api.ts";
 import { useUIStore } from "../../store/ui-store.ts";
 import { Button } from "../shared/Button.tsx";
 import { useConfirm } from "../shared/ConfirmDialog.tsx";
 import type { Room, RoomDescription, RoomEntry } from "../../engine/types.ts";
+import {
+  clearRoomDraft,
+  descriptionToDraft,
+  getRoomDraft,
+  saveRoomDraft,
+  type RoomDraftFields,
+} from "../../store/content-drafts.ts";
 
 function RoomListItem({
   room,
@@ -34,16 +42,7 @@ function RoomListItem({
   );
 }
 
-interface EditDraft {
-  name: string;
-  features: string;
-  monsters: string;
-  treasure: string;
-  hiddenTreasure: string;
-  traps: string;
-  tricks: string;
-  notes: string;
-}
+interface EditDraft extends RoomDraftFields {}
 
 function descToText(desc: RoomDescription | undefined): string {
   return desc?.features ?? desc?.description ?? "";
@@ -80,33 +79,31 @@ function RoomDetail({
 }) {
   const setRoomDescription = useDungeonStore((s) => s.setRoomDescription);
   const clearRoomDescription = useDungeonStore((s) => s.clearRoomDescription);
+  const restoreRevision = useDungeonStore((s) => s.restoreRevision);
+  const dungeonId = useDungeonStore((s) => s.dungeonId);
   const { ask, dialog } = useConfirm();
   const desc = description ?? room.description;
   const name = roomName(room, desc);
 
   const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState<EditDraft>({
-    name: "",
-    features: "",
-    monsters: "",
-    treasure: "",
-    hiddenTreasure: "",
-    traps: "",
-    tricks: "",
-    notes: "",
-  });
+  const [history, setHistory] = useState<Awaited<ReturnType<typeof api.dungeons.revisions>>>([]);
+  const [draft, setDraft] = useState<EditDraft>(() =>
+    getRoomDraft(dungeonId, room.id) ?? descriptionToDraft(desc),
+  );
+
+  const updateDraft = useCallback(
+    (patch: Partial<EditDraft>) => {
+      setDraft((previous) => {
+        const next = { ...previous, ...patch };
+        saveRoomDraft(dungeonId, room.id, next);
+        return next;
+      });
+    },
+    [dungeonId, room.id],
+  );
 
   const startEdit = useCallback(() => {
-    setDraft({
-      name: desc?.name ?? "",
-      features: descToText(desc),
-      monsters: desc?.monsters?.join("\n") ?? "",
-      treasure: desc?.treasure?.join("\n") ?? "",
-      hiddenTreasure: desc?.hiddenTreasure ?? "",
-      traps: desc?.traps?.join("\n") ?? "",
-      tricks: desc?.tricks?.join("\n") ?? "",
-      notes: desc?.notes ?? "",
-    });
+    setDraft(getRoomDraft(dungeonId, room.id) ?? descriptionToDraft(desc));
     setIsEditing(true);
   }, [desc]);
 
@@ -125,8 +122,14 @@ function RoomDetail({
       empty: desc?.empty,
     };
     setRoomDescription(room.id, saved);
+    clearRoomDraft(dungeonId, room.id);
     setIsEditing(false);
-  }, [draft, room.id, desc, setRoomDescription]);
+  }, [draft, room.id, desc, dungeonId, setRoomDescription]);
+
+  const loadHistory = useCallback(async () => {
+    if (dungeonId === null) return;
+    setHistory(await api.dungeons.revisions(dungeonId, { kind: "room", roomIndex: room.id }));
+  }, [dungeonId, room.id]);
 
   if (isEditing) {
     return (
@@ -144,7 +147,7 @@ function RoomDetail({
             <input
               className="room-edit-input"
               value={draft.name}
-              onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+              onChange={(e) => updateDraft({ name: e.target.value })}
               placeholder={roomName(room)}
             />
           </label>
@@ -154,7 +157,7 @@ function RoomDetail({
             <textarea
               className="room-edit-textarea"
               value={draft.features}
-              onChange={(e) => setDraft((d) => ({ ...d, features: e.target.value }))}
+              onChange={(e) => updateDraft({ features: e.target.value })}
               rows={4}
               placeholder="Room description…"
             />
@@ -165,7 +168,7 @@ function RoomDetail({
             <textarea
               className="room-edit-textarea"
               value={draft.monsters}
-              onChange={(e) => setDraft((d) => ({ ...d, monsters: e.target.value }))}
+              onChange={(e) => updateDraft({ monsters: e.target.value })}
               rows={3}
               placeholder={"2 Goblins (CR 1/4, MM p.166, 50 XP each)\n1 Hobgoblin"}
             />
@@ -176,7 +179,7 @@ function RoomDetail({
             <textarea
               className="room-edit-textarea"
               value={draft.treasure}
-              onChange={(e) => setDraft((d) => ({ ...d, treasure: e.target.value }))}
+              onChange={(e) => updateDraft({ treasure: e.target.value })}
               rows={3}
               placeholder={"50 sp in a cracked clay pot\nOrnate dagger (+1)"}
             />
@@ -187,7 +190,7 @@ function RoomDetail({
             <input
               className="room-edit-input"
               value={draft.hiddenTreasure}
-              onChange={(e) => setDraft((d) => ({ ...d, hiddenTreasure: e.target.value }))}
+              onChange={(e) => updateDraft({ hiddenTreasure: e.target.value })}
               placeholder="Loose flagstone (DC 14 Perception): 120 gp"
             />
           </label>
@@ -197,7 +200,7 @@ function RoomDetail({
             <textarea
               className="room-edit-textarea"
               value={draft.traps}
-              onChange={(e) => setDraft((d) => ({ ...d, traps: e.target.value }))}
+              onChange={(e) => updateDraft({ traps: e.target.value })}
               rows={2}
               placeholder="Needle trap on chest: DC 13 Perception, DC 12 Dex save or 1 piercing"
             />
@@ -208,7 +211,7 @@ function RoomDetail({
             <textarea
               className="room-edit-textarea"
               value={draft.tricks}
-              onChange={(e) => setDraft((d) => ({ ...d, tricks: e.target.value }))}
+              onChange={(e) => updateDraft({ tricks: e.target.value })}
               rows={2}
               placeholder="Magic mirror shows a different room…"
             />
@@ -219,7 +222,7 @@ function RoomDetail({
             <textarea
               className="room-edit-textarea"
               value={draft.notes}
-              onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+              onChange={(e) => updateDraft({ notes: e.target.value })}
               rows={2}
               placeholder="DM notes…"
             />
@@ -319,6 +322,9 @@ function RoomDetail({
         <Button variant="secondary" size="sm" onClick={onRegenerate}>
           Regenerate Description
         </Button>
+        <Button variant="secondary" size="sm" onClick={() => void loadHistory()}>
+          History
+        </Button>
         {desc && (
           <button
             className="room-detail-clear"
@@ -337,6 +343,16 @@ function RoomDetail({
           </button>
         )}
       </div>
+      {history.length > 0 && (
+        <div className="dungeon-panel-history">
+          <strong>Previous versions</strong>
+          {history.slice(0, 5).map((revision) => (
+            <button key={revision.id} onClick={() => void restoreRevision(revision.id)}>
+              {new Date(revision.createdAt).toLocaleString()} — Restore
+            </button>
+          ))}
+        </div>
+      )}
       {dialog}
     </div>
   );
@@ -347,6 +363,7 @@ export function RoomPanel() {
   const roomDescriptions = useDungeonStore((s) => s.roomDescriptions);
   const isDescribingRooms = useDungeonStore((s) => s.isDescribingRooms);
   const describeProgress = useDungeonStore((s) => s.describeProgress);
+  const missingRoomIds = useDungeonStore((s) => s.missingRoomIds);
   const selectedRoomId = useUIStore((s) => s.selectedRoomId);
   const setSelectedRoomId = useUIStore((s) => s.setSelectedRoomId);
 
@@ -360,8 +377,8 @@ export function RoomPanel() {
 
   const handleDescribeAll = useCallback(() => {
     if (!dungeon || isDescribingRooms) return;
-    describeRooms();
-  }, [dungeon, isDescribingRooms, describeRooms]);
+    describeRooms(missingRoomIds.length > 0 ? missingRoomIds : undefined);
+  }, [dungeon, isDescribingRooms, describeRooms, missingRoomIds]);
 
   if (!dungeon) {
     return (
@@ -399,7 +416,11 @@ export function RoomPanel() {
           onClick={handleDescribeAll}
           disabled={isDescribingRooms}
         >
-          {isDescribingRooms ? "Describing..." : "Describe All"}
+          {isDescribingRooms
+            ? "Describing..."
+            : missingRoomIds.length > 0
+              ? `Retry ${missingRoomIds.length} missing`
+              : "Describe All"}
         </Button>
       </div>
       {describeProgress && (

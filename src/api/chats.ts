@@ -86,11 +86,13 @@ export async function handleAppendMessage(
 
   try {
     if (Array.isArray(body.messages)) {
-      const clean = body.messages.filter(
-        (m): m is MessageInput =>
-          isRole(m?.role) && typeof m?.content === "string",
-      );
-      return json({ messages: replaceMessages(db, chatId, clean) });
+      if (
+        body.messages.some(
+          (m) => !isRole(m?.role) || typeof m?.content !== "string",
+        )
+      )
+        return badRequest("Every replacement message needs a role and string content");
+      return json({ messages: replaceMessages(db, chatId, body.messages as MessageInput[]) });
     }
 
     if (!isRole(body.role) || typeof body.content !== "string") {

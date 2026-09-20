@@ -58,6 +58,16 @@ export interface DungeonRecord extends DungeonSummary {
   roomNotes: Array<[number, RoomDescription]>;
 }
 
+export interface DungeonRevision {
+  id: number;
+  dungeonId: number;
+  kind: "overview" | "room";
+  roomIndex: number | null;
+  content: DungeonDescription | RoomDescription;
+  source: string;
+  createdAt: number;
+}
+
 export interface DungeonInput {
   name: string;
   seed?: number | null;
@@ -66,6 +76,7 @@ export interface DungeonInput {
   overview?: DungeonDescription | null;
   blueprint?: Blueprint | null;
   parentId?: number | null;
+  forkOperationId?: string | null;
 }
 
 export type DungeonPatch = Partial<Omit<DungeonInput, "parentId">> & {
