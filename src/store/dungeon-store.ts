@@ -11,6 +11,7 @@ import type {
 import type { Blueprint, BlueprintProblem } from "../ai/blueprint.ts";
 import { blueprintFromDungeon } from "../engine/refine-ops.ts";
 import { renderDungeonDataUrl } from "../export/png-export.ts";
+import { useUIStore } from "./ui-store.ts";
 
 /** One line of a pending refinement's diff. */
 export interface RefinementChange {
@@ -88,6 +89,8 @@ interface DungeonState {
   // Edit history — per open dungeon, cleared on load
   _undoStack: Dungeon[];
   _redoStack: Dungeon[];
+  _undoRoomNotes: Array<Map<number, RoomDescription>>;
+  _redoRoomNotes: Array<Map<number, RoomDescription>>;
 
   // Actions
   loadDungeon: (id: number) => Promise<void>;
@@ -222,6 +225,21 @@ function queueSave(id: number | null, patch: DungeonPatch): void {
     patch,
   );
 }
+
+function roomNotePatch(
+  from: Map<number, RoomDescription>,
+  to: Map<number, RoomDescription>,
+): Array<[number, RoomDescription | null]> {
+  const ids = new Set([...from.keys(), ...to.keys()]);
+  const patch: Array<[number, RoomDescription | null]> = [];
+  for (const id of ids) {
+    const before = from.get(id);
+    const after = to.get(id);
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    patch.push([id, after ?? null]);
+  }
+  return patch;
+}
 export async function flushDungeonSave(): Promise<void> {
   await Promise.all(
     dungeonSaves
@@ -274,6 +292,8 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
   pendingForkOperationId: null,
   _undoStack: [] as Dungeon[],
   _redoStack: [] as Dungeon[],
+  _undoRoomNotes: [] as Array<Map<number, RoomDescription>>,
+  _redoRoomNotes: [] as Array<Map<number, RoomDescription>>,
   ...transientDefaults,
 
   setError: (error) => set({ error }),
@@ -302,6 +322,8 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       pendingForkOperationId: null,
       _undoStack: [],
       _redoStack: [],
+      _undoRoomNotes: [],
+      _redoRoomNotes: [],
     });
     try {
       const loaded = await api.dungeons.get(id);
@@ -354,6 +376,8 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       pendingForkOperationId: null,
       _undoStack: [],
       _redoStack: [],
+      _undoRoomNotes: [],
+      _redoRoomNotes: [],
       ...transientDefaults,
     });
   },
@@ -757,45 +781,109 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
   },
 
   patchDungeon: (updater) => {
-    const { dungeon, dungeonId } = get();
+    const { dungeon, dungeonId, roomDescriptions } = get();
     if (!dungeon) return;
     const next = updater(dungeon);
-    set({ dungeon: next });
-    queueSave(dungeonId, { geometry: next });
+    const nextNotes = new Map(roomDescriptions);
+    const nextRoomIds = new Set(next.rooms.map((room) => room.id));
+    for (const roomId of nextNotes.keys()) {
+      if (!nextRoomIds.has(roomId)) nextNotes.delete(roomId);
+    }
+    set({ dungeon: next, roomDescriptions: nextNotes });
+
+    const selectedRoomId = useUIStore.getState().selectedRoomId;
+    if (selectedRoomId !== null && !nextRoomIds.has(selectedRoomId)) {
+      useUIStore.getState().setSelectedRoomId(null);
+    }
+
+    const notes = roomNotePatch(roomDescriptions, nextNotes);
+    queueSave(
+      dungeonId,
+      notes.length > 0 ? { geometry: next, roomNotes: notes } : { geometry: next },
+    );
   },
 
   pushEditSnapshot: () => {
-    const { dungeon, _undoStack } = get();
+    const { dungeon, roomDescriptions, _undoStack, _undoRoomNotes } = get();
     if (!dungeon) return;
     const next = [..._undoStack, dungeon];
+    const nextNotes = [..._undoRoomNotes, new Map(roomDescriptions)];
     if (next.length > 50) next.shift();
-    set({ _undoStack: next, _redoStack: [] });
+    if (nextNotes.length > 50) nextNotes.shift();
+    set({
+      _undoStack: next,
+      _undoRoomNotes: nextNotes,
+      _redoStack: [],
+      _redoRoomNotes: [],
+    });
   },
 
   undoEdit: () => {
-    const { dungeon, dungeonId, _undoStack, _redoStack } = get();
-    if (_undoStack.length === 0 || !dungeon) return;
+    const {
+      dungeon,
+      dungeonId,
+      roomDescriptions,
+      _undoStack,
+      _redoStack,
+      _undoRoomNotes,
+      _redoRoomNotes,
+    } = get();
+    if (_undoStack.length === 0 || !_undoRoomNotes.length || !dungeon) return;
     const prev = _undoStack[_undoStack.length - 1]!;
+    const prevNotes = _undoRoomNotes[_undoRoomNotes.length - 1]!;
     const nextRedo = [dungeon, ..._redoStack].slice(0, 50);
+    const nextRedoNotes = [new Map(roomDescriptions), ..._redoRoomNotes].slice(0, 50);
     set({
       dungeon: prev,
+      roomDescriptions: new Map(prevNotes),
       _undoStack: _undoStack.slice(0, -1),
+      _undoRoomNotes: _undoRoomNotes.slice(0, -1),
       _redoStack: nextRedo,
+      _redoRoomNotes: nextRedoNotes,
     });
-    queueSave(dungeonId, { geometry: prev });
+    const selectedRoomId = useUIStore.getState().selectedRoomId;
+    if (selectedRoomId !== null && !prev.rooms.some((room) => room.id === selectedRoomId)) {
+      useUIStore.getState().setSelectedRoomId(null);
+    }
+    const notes = roomNotePatch(roomDescriptions, prevNotes);
+    queueSave(
+      dungeonId,
+      notes.length > 0 ? { geometry: prev, roomNotes: notes } : { geometry: prev },
+    );
   },
 
   redoEdit: () => {
-    const { dungeon, dungeonId, _undoStack, _redoStack } = get();
-    if (_redoStack.length === 0 || !dungeon) return;
+    const {
+      dungeon,
+      dungeonId,
+      roomDescriptions,
+      _undoStack,
+      _redoStack,
+      _undoRoomNotes,
+      _redoRoomNotes,
+    } = get();
+    if (_redoStack.length === 0 || !_redoRoomNotes.length || !dungeon) return;
     const next = _redoStack[0]!;
+    const nextNotes = _redoRoomNotes[0]!;
     const nextUndo = [..._undoStack, dungeon].slice(-50);
+    const nextUndoNotes = [..._undoRoomNotes, new Map(roomDescriptions)].slice(-50);
     set({
       dungeon: next,
+      roomDescriptions: new Map(nextNotes),
       _undoStack: nextUndo,
       _redoStack: _redoStack.slice(1),
+      _undoRoomNotes: nextUndoNotes,
+      _redoRoomNotes: _redoRoomNotes.slice(1),
     });
-    queueSave(dungeonId, { geometry: next });
+    const selectedRoomId = useUIStore.getState().selectedRoomId;
+    if (selectedRoomId !== null && !next.rooms.some((room) => room.id === selectedRoomId)) {
+      useUIStore.getState().setSelectedRoomId(null);
+    }
+    const notes = roomNotePatch(roomDescriptions, nextNotes);
+    queueSave(
+      dungeonId,
+      notes.length > 0 ? { geometry: next, roomNotes: notes } : { geometry: next },
+    );
   },
 
   reset: () => {
@@ -808,6 +896,8 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       dungeonDescription: null,
       _undoStack: [],
       _redoStack: [],
+      _undoRoomNotes: [],
+      _redoRoomNotes: [],
       ...transientDefaults,
     });
   },
@@ -931,6 +1021,8 @@ async function applyGeneratedGeometry(
         dungeonDescription: null,
         _undoStack: [],
         _redoStack: [],
+        _undoRoomNotes: [],
+        _redoRoomNotes: [],
       });
       queueSave(dungeonId, {
         config,

@@ -60,6 +60,7 @@ export function LayoutPanel() {
   if (dungeon === null) return null;
 
   const report = dungeon.report;
+  const editStatus = dungeon.editStatus;
   const planned = dungeon.rooms.filter((r) => r.role !== "junction");
   const byTier = new Map<number, typeof planned>();
   for (const room of planned) {
@@ -78,6 +79,24 @@ export function LayoutPanel() {
 
       {proposedBlueprint !== null && (
         <p className="layout-notice">This floor plan is proposed and unapplied. Generate to create a new version.</p>
+      )}
+
+      {editStatus?.narrativeStale && (
+        <p className="layout-notice layout-notice--warning">
+          Map geometry changed. Review room descriptions, dungeon overview, and the floor plan before publishing.
+        </p>
+      )}
+
+      {editStatus?.planStale && !editStatus.narrativeStale && (
+        <p className="layout-notice layout-notice--warning">
+          Connectivity changed. Review the floor plan before publishing.
+        </p>
+      )}
+
+      {editStatus !== undefined && editStatus.disconnectedRoomIds.length > 0 && (
+        <p className="layout-notice layout-notice--warning">
+          {editStatus.disconnectedRoomIds.length} room{editStatus.disconnectedRoomIds.length === 1 ? " is" : "s are"} disconnected from the map route.
+        </p>
       )}
 
       {report !== undefined && (

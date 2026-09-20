@@ -403,7 +403,7 @@ export function DungeonCanvas() {
         if (hoveredRoomId !== null && hoveredRoomId !== selectedRoomId) {
           ctx.fillStyle = colors.hover;
           const hovRoom = d.rooms.find((r) => r.id === hoveredRoomId);
-          if (hovRoom && !isCaveShape(hovRoom.shape)) {
+          if (hovRoom && !isCaveShape(hovRoom.shape) && hovRoom.footprint === undefined) {
             ctx.fill(createRoomPath(getRoomGeometry(hovRoom, CELL_SIZE)));
           } else {
             for (let y = 0; y < d.height; y++) {
@@ -433,7 +433,7 @@ export function DungeonCanvas() {
         if (selectedRoomId !== null) {
           ctx.fillStyle = colors.select;
           const selRoom = d.rooms.find((r) => r.id === selectedRoomId);
-          if (selRoom && !isCaveShape(selRoom.shape)) {
+          if (selRoom && !isCaveShape(selRoom.shape) && selRoom.footprint === undefined) {
             ctx.fill(createRoomPath(getRoomGeometry(selRoom, CELL_SIZE)));
           } else {
             for (let y = 0; y < d.height; y++) {

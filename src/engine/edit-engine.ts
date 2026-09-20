@@ -1,6 +1,7 @@
 import { CellType, FeatureType } from "./types.ts";
 import type { Dungeon, Room, Corridor, Cell, Feature } from "./types.ts";
 import { useDungeonStore } from "../store/dungeon-store.ts";
+import { reconcileDungeon } from "./edit-reconcile.ts";
 
 export type EditTool =
   | "select"
@@ -54,6 +55,36 @@ export class EditEngine {
   }
 
   private _pushCell(x: number, y: number): void {
+    const last = this._activeStroke[this._activeStroke.length - 1];
+    if (!last) {
+      this._recordCell(x, y);
+      return;
+    }
+    // Pointer events are sampled. Bresenham interpolation makes a fast drag
+    // one continuous edit instead of a dotted line with unpainted gaps.
+    let x0 = last.x;
+    let y0 = last.y;
+    const dx = Math.abs(x - x0);
+    const dy = Math.abs(y - y0);
+    const sx = x0 < x ? 1 : -1;
+    const sy = y0 < y ? 1 : -1;
+    let error = dx - dy;
+    while (true) {
+      this._recordCell(x0, y0);
+      if (x0 === x && y0 === y) break;
+      const twice = error * 2;
+      if (twice > -dy) {
+        error -= dy;
+        x0 += sx;
+      }
+      if (twice < dx) {
+        error += dx;
+        y0 += sy;
+      }
+    }
+  }
+
+  private _recordCell(x: number, y: number): void {
     const key = `${x},${y}`;
     if (this.strokeSet.has(key)) return;
     this.strokeSet.add(key);
@@ -87,7 +118,7 @@ export class EditEngine {
 
 // ─── Stroke application (pure) ────────────────────────────────────────────────
 
-function applyEditStroke(
+export function applyEditStroke(
   dungeon: Dungeon,
   cells: Array<{ x: number; y: number }>,
   tool: EditTool,
@@ -104,6 +135,11 @@ function applyEditStroke(
   let newRooms = [...dungeon.rooms];
   let newCorridors = [...dungeon.corridors];
   let newFeatures = [...dungeon.features];
+  const affectedRoomIds = new Set<number>();
+  for (const { x, y } of validCells) {
+    const roomId = dungeon.grid[y]?.[x]?.roomId;
+    if (roomId !== null && roomId !== undefined) affectedRoomIds.add(roomId);
+  }
 
   switch (tool) {
     case "floor":
@@ -135,7 +171,14 @@ function applyEditStroke(
       break;
   }
 
-  return { ...dungeon, grid: newGrid, rooms: newRooms, corridors: newCorridors, features: newFeatures };
+  for (const { x, y } of validCells) {
+    const roomId = newGrid[y]?.[x]?.roomId;
+    if (roomId !== null && roomId !== undefined) affectedRoomIds.add(roomId);
+  }
+  return reconcileDungeon(
+    { ...dungeon, grid: newGrid, rooms: newRooms, corridors: newCorridors, features: newFeatures },
+    { affectedRoomIds },
+  );
 }
 
 function assignCell(
@@ -247,6 +290,10 @@ function applySpecialCell(
 ): Feature[] {
   const newFeatures = [...features];
   for (const { x, y } of cells) {
+    for (let i = newFeatures.length - 1; i >= 0; i--) {
+      const existing = newFeatures[i]!;
+      if (existing.x === x && existing.y === y) newFeatures.splice(i, 1);
+    }
     const nextFid = newFeatures.length > 0 ? Math.max(...newFeatures.map((f) => f.id)) + 1 : 1;
     const existingCell = grid[y]?.[x];
     newFeatures.push({ id: nextFid, type: featureType, x, y });

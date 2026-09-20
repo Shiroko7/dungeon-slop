@@ -74,6 +74,13 @@ function buildFloorPath(dungeon: Dungeon, cellSize: number): Path2D {
   // All non-Cave rooms get a smooth geometric path (rect, ellipse, or polygon).
   const geometricRoomIds = new Set<number>();
   for (const room of rooms) {
+    if (room.footprint !== undefined) {
+      geometricRoomIds.add(room.id);
+      for (const point of room.footprint) {
+        path.rect(point.x * cellSize, point.y * cellSize, cellSize, cellSize);
+      }
+      continue;
+    }
     if (isCaveShape(room.shape)) continue;
     geometricRoomIds.add(room.id);
     path.addPath(createRoomPath(getRoomGeometry(room, cellSize)));
@@ -322,7 +329,11 @@ function drawRoomOverlay(
 
   ctx.fillStyle = color;
 
-  if (!isCaveShape(room.shape)) {
+  if (room.footprint !== undefined) {
+    for (const point of room.footprint) {
+      ctx.fillRect(point.x * cellSize, point.y * cellSize, cellSize, cellSize);
+    }
+  } else if (!isCaveShape(room.shape)) {
     // All non-Cave rooms have a smooth geometric path (rect, ellipse, polygon, cross)
     ctx.fill(createRoomPath(getRoomGeometry(room, cellSize)));
   } else {
@@ -368,4 +379,3 @@ export function buildDungeonBuffer(
   renderStaticLayers(ctx, dungeon, opts);
   return buf;
 }
-

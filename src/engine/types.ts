@@ -66,6 +66,9 @@ export interface Room {
   shape: string;
   connections: number[];
   features: Feature[];
+  /** Cell footprint created after a manual edit. Procedural rooms keep their
+   * smooth shape until an edit actually changes their boundary. */
+  footprint?: Array<{ x: number; y: number }>;
   description?: RoomDescription;
   /** Assigned by the layout-rules pass, not by the geometry generators. */
   role?: RoomRole;
@@ -175,4 +178,10 @@ export interface Dungeon {
   config: DungeonConfig;
   seed: number;
   report?: LayoutReport;
+  /** Derived warnings produced by the editor when authored structure is stale. */
+  editStatus?: {
+    narrativeStale: boolean;
+    planStale: boolean;
+    disconnectedRoomIds: number[];
+  };
 }

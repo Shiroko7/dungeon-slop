@@ -3,6 +3,9 @@ import { DungeonConfigSchema } from "../ai/schema.ts";
 import { BlueprintSchema } from "../ai/blueprint.ts";
 
 const id = z.number().int().nonnegative();
+// A hand-drawn corridor may intentionally end in open space. `-1` is the
+// persisted sentinel for that real dead end; connected rooms always use ids.
+const roomEndpoint = z.number().int().min(-1);
 const point = z.object({ x: z.number(), y: z.number() });
 const feature = point
   .extend({
@@ -81,8 +84,8 @@ export const GeometrySchema = z
       z
         .object({
           id,
-          roomA: id,
-          roomB: id,
+          roomA: roomEndpoint,
+          roomB: roomEndpoint,
           path: z.array(point),
           width: z.number().positive(),
         })

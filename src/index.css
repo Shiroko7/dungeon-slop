@@ -3916,6 +3916,17 @@ a.home-stat:hover .home-stat-n {
   color: var(--text-3);
 }
 
+.layout-notice--warning {
+  color: var(--error);
+}
+
+.room-detail-warning {
+  margin: 0 0 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--error);
+}
+
 .layout-problems {
   margin: 0;
   padding-left: 16px;
