@@ -1,26 +1,39 @@
 # dungeon-slop
 
 A dungeon generator and map editor for tabletop games, with an AI architect that
-builds from your campaign notes and a narrator that writes the room descriptions.
+plans rooms and connections and a narrator that writes room descriptions.
 
 Runs locally on Bun + SQLite. The name undersells it; the test suite does not.
 
 ```
-1288 pass · 0 fail · 14 files
+1320 pass · 0 fail · 18 files
 ```
+
+M1.1 verification: 2026-09-20. Rust also has 28 baseline passing tests. New tests
+cover request ownership, save recovery and conflicts; authorship, editor and export
+corrections remain on the roadmap. Browser verification for M1.1 is pending.
+
+See [ROADMAP.md](ROADMAP.md) for the four milestones and detailed PR scopes, and
+[TASKS.md](TASKS.md) for execution status. Milestone 1 is grouped into four PRs:
+reliable requests/saves, authorship/revisions, editor consistency, and note ingestion.
 
 ## The idea
 
 Most dungeon generators hand you noise: a plausible-looking maze with no
 relationship to your campaign. Most AI writing tools hand you prose with no
-relationship to a map. This does both halves and makes them agree with each
-other.
+relationship to a map. The goal here is to connect both halves with inspectable
+sources and dependable editing.
 
-You drop your campaign notes in. You tell the architect "the cult's flooded
-undercroft, three ways in, the ritual chamber should be hard to reach." It reads
-the notes, produces a **blueprint** — rooms, roles, adjacency — the procedural
-engine lays that out as real geometry, and the narrator writes each room knowing
-what the room next door is and what your notes say the cult does down there.
+The intended workflow: drop your campaign notes in and tell the architect "the
+cult's flooded undercroft, three ways in, the ritual chamber should be hard to
+reach." It retrieves relevant notes and produces a **blueprint** — rooms, roles,
+adjacency — the procedural engine lays that out as real geometry, and the narrator
+writes rooms consistent with the map and those sources.
+
+**Today:** prompt/chat-driven planning, procedural layout, narration, editing, and
+note ingestion exist. Retrieval is not connected to the Architect or Narrator,
+and the Loremaster saves questions but does not answer. Completing that connection
+is milestone 2, after protecting existing work in milestone 1.
 
 ## Everything lives in one tree
 
@@ -34,17 +47,31 @@ Campaign          the only root — independent, named, deletable
     └── Edit history     undo stack, per open dungeon
 ```
 
-Ownership is enforced by foreign keys, not by convention: nothing exists outside
-a campaign, and deleting a campaign takes its notes, chunks, embeddings,
-dungeons, and room descriptions with it. Ten tables, migrated forward on open
-(`src/db/migrate.ts`).
+Campaign content ownership is enforced by foreign keys: deleting a campaign takes
+its notes, chunks, embeddings, dungeons, chats, and room descriptions with it.
+Usage events intentionally survive with nullable owner references so the accounting
+record is retained. Schema migrations run on open (`src/db/migrate.ts`).
+
+## Reliable saves and recovery
+
+Dungeon changes share a revision-checked save queue. Failed saves retain their pending
+edits; the workspace shows retry, recovery-export and explicit conflict-resolution
+choices. Leaving a dungeon cancels its interactive generation, and stale responses
+cannot apply to the newly selected dungeon. Provider work already performed may
+still be charged.
+
+Recovery copies are bounded to 4 MiB / 20 pending maps per browser origin. If storage
+is full or unavailable, keep the tab open until Saved or export the local copy.
+The local API explicitly binds to loopback and checks browser mutation origins.
+See [M1.1 review and operating notes](docs/M1.1-REVIEW.md) for API compatibility,
+migration precautions, limits and the outstanding browser verification checklist.
 
 ## Generation is deterministic
 
 `src/engine/` is a procedural pipeline driven by a **seeded RNG**
-(`src/lib/random.ts`). The same seed and config always produce the same dungeon —
-which is what makes any of it testable, and what lets you share a map as a short
-string instead of a file.
+(`src/lib/random.ts`). The same seed and config reproduce procedural geometry for
+the same engine version; blueprint generation also requires the same blueprint.
+Manual edits and authored descriptions require a saved artifact, not just a seed.
 
 The pipeline:
 
@@ -57,8 +84,8 @@ The pipeline:
 4. **Layout rules** (`layout-rules.ts`) assign room roles, enforce a corridor
    budget, and check for loops — because a dungeon that is a pure tree plays
    badly and a dungeon that is all loops has no tension.
-5. **Walls** are derived from floor adjacency rather than authored, so they
-   cannot desync from the geometry.
+5. **Walls** are derived from floor adjacency during generation. Keeping them
+   consistent after manual editing is part of milestone 1.
 
 ### The tests are invariants, not snapshots
 
@@ -78,27 +105,31 @@ otherwise find at the table, mid-session, in front of five people.
 
 ## Two AI passes, three providers
 
-**Architect** (`src/ai/prompts/architect.ts`) produces a structured blueprint —
-validated against a schema (`src/ai/schema.ts`), not free text — which
-`blueprint-layout.ts` turns into geometry. **Narrator**
+**Architect** uses separate config and blueprint prompts (`src/ai/prompts/`).
+Config is validated by `src/ai/schema.ts`, and the blueprint by
+`src/ai/blueprint.ts`; `blueprint-layout.ts` turns the plan into geometry. **Narrator**
 (`src/ai/prompts/narrator.ts`) writes room descriptions afterwards, with the map
-and the notes as context. A **refine** pass handles "make the east wing bigger"
+and chat history as context. A **refine** pass handles "make the east wing bigger"
 style edits against an existing map.
 
 Providers are pluggable (`src/ai/providers/`): **Claude**, **Gemini**, and
-**Ollama** for fully local generation. One registry resolves provider, model,
-and key; swapping is configuration, not a rewrite.
+**Ollama** for local generation. One registry resolves generation provider, model,
+and key. Note embedding and summarization use separate environment configuration;
+selecting Ollama in the UI does not make note processing local.
 
-Token usage and cost are tracked per call into a `usage_events` table, with a
-tested pricing module (`src/ai/pricing.test.ts`). You can see exactly what a
-dungeon cost you, which is the feature every AI app should have and most do not.
+Generation token usage is recorded in `usage_events`, with a tested pricing module
+(`src/ai/pricing.test.ts`). Cloud rates are currently unset, and note-processing
+calls are not yet included. This is not a complete billing record; coverage and
+reproducible cost estimates are planned in milestone 3.
 
-## Notes as retrieval, not as a prompt dump
+## Notes ingestion and planned retrieval
 
-`src/notes/` is a small RAG pipeline. Documents are chunked with token
-estimation and overlap (`chunker.ts`), content-hashed so re-uploading an
-unchanged file is a no-op (`ingest.ts`), embedded, and stored as vectors.
-Retrieval is cosine similarity over normalised vectors.
+`src/notes/` chunks documents with token estimation and overlap (`chunker.ts`),
+records content hashes, embeds chunks, and stores vectors and summaries. Unchanged
+uploads still repeat processing, and failed replacement can remove the previous
+index; atomic replacement and deduplication are M1.4 work.
+
+Campaign-scoped hybrid retrieval using FTS5 and vector similarity is planned in M2.1.
 
 The point is that a 200-page campaign wiki does not fit in a context window, and
 stuffing in the first 8k tokens of it gets you a dungeon themed around your
@@ -113,6 +144,11 @@ SVG overlay layer for text and grid. Polygon work via `polybooljs`.
 Export to **PDF** (`jspdf`), **PNG**, **VTT** formats for virtual tabletops, and
 plain **Markdown descriptions** for your notes app.
 
+Export correctness and audience controls need work: the combined map PDF can miss
+current room text, and description exports contain GM secrets. Treat exports as GM
+material and inspect them before sharing. Player-safe profiles, VTT corrections,
+and large-map export limits are planned in M3.1.
+
 ## Running it
 
 ```bash
@@ -121,13 +157,14 @@ cp .env.example .env    # fill in whichever provider you want
 bun run dev             # API + Vite, concurrently
 ```
 
-`.env.example` documents each provider, including which ones have usable free
-tiers. **Gemini is the default** because one key serves both chat and
-embeddings at no cost, which matters a lot when the app makes two LLM calls per
-dungeon. Or point it at Ollama and pay nothing to nobody.
+`.env.example` documents provider configuration. **Gemini is the default**;
+provider availability, quotas, and pricing depend on the account and model.
+Config, blueprint, batched room narration, and overview generation are separate
+calls, so call count varies with the chosen workflow and number of rooms. Ollama
+supports local generation; configure notes providers separately.
 
 ```bash
-bun test                # 1288 tests
+bun test                # 1320 tests
 bun run build
 ```
 
@@ -152,10 +189,12 @@ schema is SQL and the migrations are explicit.
 
 - **Single level per dungeon.** Stairs render as features but do not connect to
   a second floor. Multi-level is a data model change, not a rendering one.
-- Vector search is a linear scan over the campaign's embeddings. Fine for
-  hundreds of documents, wrong for tens of thousands — there is no ANN index.
-- The architect is only as good as your notes. Given three bullet points, it
-  will confidently invent a cult.
-- Local single-user app. No auth, no multi-user, no hosted mode.
+- Campaign retrieval and Loremaster answers are not implemented. Current AI output
+  relies on the prompt/chat and can invent details; it has no verified note citations.
+- Saving, navigation during AI requests, manual map edits, and regeneration have
+  known preservation defects. See milestone 1 for the concrete fixes and checks.
+- Local single-user app. No auth, no multi-user, no hosted mode. Explicit loopback
+  binding is planned in M1.1; do not assume the current listener is loopback-only.
+- Five of eight visual motifs currently fall back to the default palette.
 - Room descriptions are regenerated wholesale rather than edited in place, so a
   hand-tweaked description is lost if you re-narrate that room.

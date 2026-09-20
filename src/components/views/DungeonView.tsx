@@ -31,7 +31,8 @@ export function DungeonView({
   const loadDungeon = useDungeonStore((s) => s.loadDungeon);
   const dungeon = useDungeonStore((s) => s.dungeon);
   const isLoading = useDungeonStore((s) => s.isLoading);
-  const isSaving = useDungeonStore((s) => s.isSaving);
+  const loadedCampaign = useDungeonStore((s) => s.campaignId);
+  const loadedId = useDungeonStore((s) => s.dungeonId);
   const error = useDungeonStore((s) => s.error);
   const setError = useDungeonStore((s) => s.setError);
 
@@ -63,7 +64,8 @@ export function DungeonView({
 
     if (roomId !== settled.route) {
       syncedRef.current = { route: roomId, selection: roomId };
-      if (roomId !== useUIStore.getState().selectedRoomId) setSelectedRoomId(roomId);
+      if (roomId !== useUIStore.getState().selectedRoomId)
+        setSelectedRoomId(roomId);
       return;
     }
 
@@ -80,13 +82,21 @@ export function DungeonView({
     }
   }, [roomId, selectedRoomId, campaignId, dungeonId, setSelectedRoomId]);
 
-  if (isLoading && dungeon === null) {
+  if (isLoading || loadedId !== dungeonId) {
     return (
       <div className="workspace-loading">
         <LoadingSpinner />
       </div>
     );
   }
+
+  if (loadedCampaign !== campaignId)
+    return (
+      <div className="error-banner" role="alert">
+        {error ?? "This dungeon does not belong to the selected campaign."}
+        <button onClick={() => void loadDungeon(dungeonId)}>Retry</button>
+      </div>
+    );
 
   return (
     <div className="dungeon-view">
@@ -95,7 +105,10 @@ export function DungeonView({
       {error !== null && (
         <div className="error-banner">
           <span className="error-banner-text">{error}</span>
-          <button className="error-banner-dismiss" onClick={() => setError(null)}>
+          <button
+            className="error-banner-dismiss"
+            onClick={() => setError(null)}
+          >
             &times;
           </button>
         </div>
@@ -115,7 +128,6 @@ export function DungeonView({
           <DescribeActivityToast />
           <MapLegend />
           <ExportActions />
-          {isSaving && <div className="save-indicator">Saving…</div>}
         </div>
 
         {dungeon !== null && (

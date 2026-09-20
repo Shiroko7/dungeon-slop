@@ -1,3 +1,5 @@
+import { WorkspaceSaves } from "../shared/WorkspaceSaves.tsx";
+import { useNotesStore } from "../../store/notes-store.ts";
 import { useEffect } from "react";
 import { useCampaignStore } from "../../store/campaign-store.ts";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
@@ -38,8 +40,12 @@ function NotFound({ path }: { path: string }) {
 export function AppShell() {
   const route = useRoute();
   const openCampaign = useCampaignStore((s) => s.openCampaign);
-  const activeId = useCampaignStore((s) => s.active?.id ?? null);
+  const campaignError = useCampaignStore((s) => s.error);
+  const active = useCampaignStore((s) => s.active);
+  const campaignLoading = useCampaignStore((s) => s.isLoadingContents);
   const closeDungeon = useDungeonStore((s) => s.closeDungeon);
+  const loadedDungeonId = useDungeonStore((s) => s.dungeonId);
+  const loadedDungeonCampaign = useDungeonStore((s) => s.campaignId);
   const closeChat = useChatStore((s) => s.close);
   const isSidebarOpen = useUIStore((s) => s.isSidebarOpen);
 
@@ -48,8 +54,13 @@ export function AppShell() {
   // Loading the campaign is the shell's job, not each view's: the rail and the
   // context column both need it before the workspace has rendered anything.
   useEffect(() => {
-    if (campaignId !== null && campaignId !== activeId) void openCampaign(campaignId);
-  }, [campaignId, activeId, openCampaign]);
+    if (campaignId !== null) void openCampaign(campaignId);
+    else useCampaignStore.getState().clearActive();
+  }, [campaignId, openCampaign]);
+
+  useEffect(() => {
+    if (route.view !== "notes") useNotesStore.getState().close();
+  }, [route.view]);
 
   // Leaving a dungeon flushes its pending autosave and drops the working copy,
   // so the next one cannot inherit stale geometry.
@@ -61,12 +72,25 @@ export function AppShell() {
     if (route.view !== "chat" && route.view !== "dungeon") closeChat();
   }, [route.view, closeChat]);
 
-  if (route.view === "picker") return <CampaignPicker />;
+  if (route.view === "picker")
+    return (
+      <>
+        <WorkspaceSaves />
+        <CampaignPicker />
+      </>
+    );
   if (route.view === "unknown") return <NotFound path={route.path} />;
 
   const context =
     route.view === "dungeon" ? (
-      <DungeonContext campaignId={route.campaignId} dungeonId={route.dungeonId} />
+      loadedDungeonId === route.dungeonId &&
+      loadedDungeonCampaign === route.campaignId ? (
+        <DungeonContext
+          key={route.dungeonId}
+          campaignId={route.campaignId}
+          dungeonId={route.dungeonId}
+        />
+      ) : null
     ) : (
       <CampaignContext route={route} />
     );
@@ -83,11 +107,14 @@ export function AppShell() {
       workspace = <UsageView campaignId={route.campaignId} />;
       break;
     case "chat":
-      workspace = <ChatView campaignId={route.campaignId} chatId={route.chatId} />;
+      workspace = (
+        <ChatView campaignId={route.campaignId} chatId={route.chatId} />
+      );
       break;
     case "dungeon":
       workspace = (
         <DungeonView
+          key={route.dungeonId}
           campaignId={route.campaignId}
           dungeonId={route.dungeonId}
           roomId={route.roomId}
@@ -100,7 +127,20 @@ export function AppShell() {
     <div className="app-shell">
       <Rail route={route} />
       {isSidebarOpen && context}
-      <main className="workspace">{workspace}</main>
+      <main className="workspace">
+        <WorkspaceSaves />
+        {!campaignLoading && !active && campaignError ? (
+          <div className="error-banner" role="alert">
+            {campaignError}{" "}
+            <button onClick={() => void openCampaign(campaignId!)}>
+              Retry
+            </button>
+            <a {...linkProps(paths.picker())}>Back to campaigns</a>
+          </div>
+        ) : (
+          workspace
+        )}
+      </main>
       <SettingsPopover />
       <ExportPopover />
     </div>

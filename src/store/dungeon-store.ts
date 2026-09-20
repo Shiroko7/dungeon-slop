@@ -1,6 +1,13 @@
 import { create } from "zustand";
+import { dungeonSaves } from "./dungeon-saves.ts";
+import { OperationScope, events, type Operation } from "./operation.ts";
+import { parseRoute, subscribeNavigation } from "../router/router.ts";
 import type { DungeonConfig } from "../ai/schema.ts";
-import type { Dungeon, Room, RoomDescription, DungeonDescription } from "../engine/types.ts";
+import type {
+  Dungeon,
+  RoomDescription,
+  DungeonDescription,
+} from "../engine/types.ts";
 import type { Blueprint, BlueprintProblem } from "../ai/blueprint.ts";
 import { blueprintFromDungeon } from "../engine/refine-ops.ts";
 import { renderDungeonDataUrl } from "../export/png-export.ts";
@@ -22,19 +29,19 @@ export interface Refinement {
 import type { DungeonPatch, DungeonRecord } from "../campaign/types.ts";
 import { useAIStore } from "./ai-store.ts";
 import { api } from "./api.ts";
-import { useChatStore } from "./chat-store.ts";
+import { useChatStore, chatVersion } from "./chat-store.ts";
 
 /**
  * The dungeon currently open in the workspace.
  *
  * This store is a working copy, not the record of truth: the database is. Edits
  * land here first so the canvas stays responsive, and a debounced autosave
- * writes them back. Nothing is persisted to localStorage any more — a second
- * copy of the geometry in the browser is a second thing that can disagree with
- * the row it came from.
+ * writes them back through a revision-checked outbox. Only unacknowledged
+ * operations are retained locally for recovery; SQLite remains canonical.
  */
 
-const SAVE_DEBOUNCE_MS = 600;
+let loadEpoch = 0;
+let applyingOperation = false;
 
 interface DungeonState {
   // Identity
@@ -56,13 +63,17 @@ interface DungeonState {
 
   // Loading/streaming
   isLoading: boolean;
-  isSaving: boolean;
   isGeneratingConfig: boolean;
   isGeneratingBlueprint: boolean;
   isGeneratingDungeon: boolean;
   isDescribingRooms: boolean;
   isDescribingDungeon: boolean;
-  describeProgress: { current: number; total: number; roomName: string; streamingText: string } | null;
+  describeProgress: {
+    current: number;
+    total: number;
+    roomName: string;
+    streamingText: string;
+  } | null;
   streamingConfig: Partial<DungeonConfig> | null;
   configRawText: string;
 
@@ -98,11 +109,14 @@ interface DungeonState {
   acceptRefinement: () => Promise<DungeonRecord | null>;
   discardRefinement: () => void;
   /** Ask the Architect for a floor plan; does not build geometry. */
-  generateBlueprint: (prompt: string) => Promise<Blueprint | null>;
+  generateBlueprint: (
+    prompt: string,
+    operation?: DungeonOperation,
+  ) => Promise<Blueprint | null>;
   /** Returns a forked dungeon when the described original had to be preserved. */
   generateDungeonFromConfig: () => Promise<DungeonRecord | null>;
   rerollDungeon: (seed?: number) => Promise<DungeonRecord | null>;
-  describeRooms: () => Promise<void>;
+  describeRooms: () => Promise<boolean>;
   describeRoom: (roomId: number) => Promise<void>;
   describeDungeon: () => Promise<void>;
 
@@ -115,7 +129,6 @@ interface DungeonState {
 
 const transientDefaults = {
   isLoading: false,
-  isSaving: false,
   isGeneratingConfig: false,
   isGeneratingBlueprint: false,
   isRefining: false,
@@ -135,60 +148,103 @@ const transientDefaults = {
  */
 const DESCRIBE_BATCH_SIZE = 8;
 
-/** SSE frames are newline-delimited. */
-const NEWLINE = "\n";
-
 // ─── autosave ─────────────────────────────────────────────────────────────────
 
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingPatch: DungeonPatch = {};
-let pendingId: number | null = null;
-
-async function writePending(): Promise<void> {
-  const id = pendingId;
-  const patch = pendingPatch;
-  pendingId = null;
-  pendingPatch = {};
-  if (saveTimer !== null) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-  }
-  if (id === null || Object.keys(patch).length === 0) return;
-
-  useDungeonStore.setState({ isSaving: true });
-  try {
-    await api.dungeons.update(id, patch);
-  } catch (err) {
-    useDungeonStore.setState({
-      error: err instanceof Error ? `Could not save: ${err.message}` : "Could not save",
-    });
-  } finally {
-    useDungeonStore.setState({ isSaving: false });
-  }
+export const dungeonOperations = new OperationScope(() => {
+  useDungeonStore.setState({
+    isGeneratingConfig: false,
+    isGeneratingBlueprint: false,
+    isGeneratingDungeon: false,
+    isDescribingRooms: false,
+    isDescribingDungeon: false,
+    isRefining: false,
+    describeProgress: null,
+  });
+});
+export interface DungeonOperation extends Operation {
+  dungeonId: number | null;
+  campaignId: number | null;
+  chatId: number | null;
+  commit(fn: () => void): void;
 }
-
-/**
- * Coalesce writes: a drag across the canvas produces a patch per frame, and all
- * of them describe the same geometry by the time the user stops.
- */
+export function beginDungeonOperation(): DungeonOperation {
+  const state = useDungeonStore.getState();
+  const chat = useChatStore.getState().chat;
+  const epoch = loadEpoch;
+  const transcriptVersion = chatVersion();
+  const base = dungeonOperations.begin();
+  const valid = () =>
+    base.valid() &&
+    epoch === loadEpoch &&
+    chatVersion() === transcriptVersion &&
+    useDungeonStore.getState().dungeonId === state.dungeonId;
+  const operation: DungeonOperation = {
+    ...base,
+    dungeonId: state.dungeonId,
+    campaignId: state.campaignId,
+    chatId:
+      chat?.dungeonId === state.dungeonId &&
+      chat?.campaignId === state.campaignId
+        ? chat.id
+        : null,
+    valid,
+    assert: () => {
+      if (!valid()) throw new DOMException("Operation cancelled", "AbortError");
+    },
+    commit: (fn) => {
+      operation.assert();
+      applyingOperation = true;
+      try {
+        fn();
+      } finally {
+        applyingOperation = false;
+      }
+    },
+  };
+  return operation;
+}
 function queueSave(id: number | null, patch: DungeonPatch): void {
+  if (!applyingOperation) dungeonOperations.cancel();
   if (id === null) return;
-  // Switching dungeons must never flush one map's edits onto another's row.
-  if (pendingId !== null && pendingId !== id) void writePending();
-
-  pendingId = id;
-  pendingPatch = { ...pendingPatch, ...patch };
-  if (saveTimer !== null) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => void writePending(), SAVE_DEBOUNCE_MS);
+  const state = useDungeonStore.getState();
+  if (state.dungeonId !== id || state.campaignId === null)
+    throw new Error("Save owner mismatch");
+  dungeonSaves.queue(
+    { id, campaignId: state.campaignId, name: state.name },
+    patch,
+  );
 }
-
-/** Force any queued write out now — before navigating away, or on unload. */
-export function flushDungeonSave(): Promise<void> {
-  return writePending();
+export async function flushDungeonSave(): Promise<void> {
+  await Promise.all(
+    dungeonSaves
+      .pendingEntries()
+      .map((entry) => dungeonSaves.flush(entry.dungeonId)),
+  );
 }
-
-if (typeof window !== "undefined") {
-  window.addEventListener("beforeunload", () => void writePending());
+const writePending = flushDungeonSave;
+export async function prepareAI(operation: DungeonOperation) {
+  operation.assert();
+  if (operation.dungeonId !== null) {
+    await dungeonSaves.flush(operation.dungeonId);
+    operation.assert();
+    if (dungeonSaves.state(operation.dungeonId).status !== "saved")
+      throw new Error("Resolve the pending save before generating.");
+  }
+  return {
+    ...aiRequestContext(operation.dungeonId, operation.campaignId),
+    operationId: operation.id,
+    chatId: operation.chatId,
+    expectedRevision:
+      operation.dungeonId === null
+        ? undefined
+        : dungeonSaves.revision(operation.dungeonId),
+  };
+}
+function operationError(operation: Operation, err: unknown) {
+  if (operation.valid())
+    useDungeonStore.setState({
+      error: err instanceof Error ? err.message : "Request failed",
+    });
 }
 
 // ─── store ────────────────────────────────────────────────────────────────────
@@ -211,12 +267,30 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
   setError: (error) => set({ error }),
 
   loadDungeon: async (id) => {
-    if (get().dungeonId === id) return;
-    await writePending();
-
-    set({ ...transientDefaults, isLoading: true, dungeonId: id });
+    if (get().dungeonId === id && !get().error) return;
+    const epoch = ++loadEpoch;
+    dungeonOperations.cancel();
+    void writePending();
+    set({
+      ...transientDefaults,
+      isLoading: true,
+      dungeonId: id,
+      campaignId: null,
+      name: "",
+      config: null,
+      dungeon: null,
+      blueprint: null,
+      refinement: null,
+      blueprintProblems: [],
+      roomDescriptions: new Map(),
+      dungeonDescription: null,
+      _undoStack: [],
+      _redoStack: [],
+    });
     try {
-      const record = await api.dungeons.get(id);
+      const loaded = await api.dungeons.get(id);
+      if (epoch !== loadEpoch) return;
+      const record = dungeonSaves.attach(loaded);
       set({
         dungeonId: record.id,
         campaignId: record.campaignId,
@@ -224,25 +298,24 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
         config: record.config,
         dungeon: record.geometry,
         blueprint: record.blueprint,
-        blueprintProblems: [],
-        refinement: null,
         dungeonDescription: record.overview,
         roomDescriptions: new Map(record.roomNotes),
-        _undoStack: [],
-        _redoStack: [],
         error: null,
       });
     } catch (err) {
-      set({
-        dungeonId: null,
-        error: err instanceof Error ? err.message : "Could not open that dungeon",
-      });
+      if (epoch === loadEpoch)
+        set({
+          error:
+            err instanceof Error ? err.message : "Could not open that dungeon",
+        });
     } finally {
-      set({ isLoading: false });
+      if (epoch === loadEpoch) set({ isLoading: false });
     }
   },
 
   closeDungeon: () => {
+    ++loadEpoch;
+    dungeonOperations.cancel();
     void writePending();
     set({
       dungeonId: null,
@@ -250,6 +323,9 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       name: "",
       config: null,
       dungeon: null,
+      blueprint: null,
+      blueprintProblems: [],
+      refinement: null,
       dungeonDescription: null,
       roomDescriptions: new Map(),
       _undoStack: [],
@@ -259,14 +335,9 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
   },
 
   rename: async (name) => {
-    const { dungeonId } = get();
-    if (dungeonId === null) return;
+    if (get().dungeonId === null || !name.trim()) return;
     set({ name });
-    try {
-      await api.dungeons.update(dungeonId, { name });
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : "Could not rename" });
-    }
+    queueSave(get().dungeonId, { name });
   },
 
   setConfig: (config) => {
@@ -285,30 +356,16 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       next.set(roomId, desc);
       return { roomDescriptions: next };
     });
-    // Written straight through rather than debounced: each description is one
-    // model call apart from the next, so there is nothing to coalesce.
-    const { dungeonId } = get();
-    if (dungeonId !== null) {
-      void api.dungeons.putRoomNote(dungeonId, roomId, desc).catch((err: unknown) => {
-        set({ error: err instanceof Error ? err.message : "Could not save that room" });
-      });
-    }
+    queueSave(get().dungeonId, { roomNotes: [[roomId, desc]] });
   },
 
-  /** Drop a room's written description; the geometry is untouched. */
   clearRoomDescription: async (roomId) => {
-    const { dungeonId } = get();
     set((state) => {
       const next = new Map(state.roomDescriptions);
       next.delete(roomId);
       return { roomDescriptions: next };
     });
-    if (dungeonId === null) return;
-    try {
-      await api.dungeons.deleteRoomNote(dungeonId, roomId);
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : "Could not clear that room" });
-    }
+    queueSave(get().dungeonId, { roomNotes: [[roomId, null]] });
   },
 
   setDungeonDescription: (desc) => {
@@ -318,7 +375,8 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
 
   setStreamingConfig: (partial) => set({ streamingConfig: partial }),
   setConfigRawText: (text) => set({ configRawText: text }),
-  setClarificationQuestion: (question) => set({ clarificationQuestion: question }),
+  setClarificationQuestion: (question) =>
+    set({ clarificationQuestion: question }),
   setIsGeneratingConfig: (v) => set({ isGeneratingConfig: v }),
   setIsGeneratingDungeon: (v) => set({ isGeneratingDungeon: v }),
   setIsDescribingRooms: (v) => set({ isDescribingRooms: v }),
@@ -336,61 +394,35 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
    * connect - and never for a coordinate. Placement stays with the code that was
    * always good at it.
    */
-  generateBlueprint: async (prompt: string) => {
-    const ctx = aiRequestContext(get().dungeonId, get().campaignId);
+  generateBlueprint: async (prompt, sharedOperation) => {
+    const operation = sharedOperation ?? beginDungeonOperation();
     set({ isGeneratingBlueprint: true, error: null, blueprintProblems: [] });
-
     try {
-      const res = await fetch("/api/generate-blueprint", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, config: get().config, ...ctx }),
-      });
-      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
+      const ctx = await prepareAI(operation);
       let blueprint: Blueprint | null = null;
-      let problems: BlueprintProblem[] = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split(NEWLINE);
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
-          } catch {
-            continue;
-          }
-          if (typeof parsed.error === "string") {
-            set({ error: parsed.error });
-            continue;
-          }
-          if (parsed.blueprint !== undefined && parsed.blueprint !== null) {
-            blueprint = parsed.blueprint as Blueprint;
-            problems = (parsed.problems as BlueprintProblem[]) ?? [];
-          }
+      for await (const parsed of events(
+        "/api/generate-blueprint",
+        { prompt, config: get().config, ...ctx },
+        operation,
+      )) {
+        if (parsed.blueprint) {
+          blueprint = parsed.blueprint as Blueprint;
+          operation.commit(() => {
+            set({
+              blueprint,
+              blueprintProblems: (parsed.problems as BlueprintProblem[]) ?? [],
+            });
+            queueSave(operation.dungeonId, { blueprint });
+          });
         }
-      }
-
-      if (blueprint !== null) {
-        set({ blueprint, blueprintProblems: problems });
-        queueSave(get().dungeonId, { blueprint });
       }
       return blueprint;
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : "Floor plan generation failed" });
+      operationError(operation, err);
       return null;
     } finally {
-      set({ isGeneratingBlueprint: false });
+      if (operation.valid()) set({ isGeneratingBlueprint: false });
+      if (!sharedOperation) operation.finish();
     }
   },
 
@@ -405,89 +437,44 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
    * drifted into another, one room stranded in a corner - are visible in the
    * picture and invisible in the graph.
    */
-  refineLayout: async (instruction?: string) => {
+  refineLayout: async (instruction) => {
     const { dungeon, blueprint } = get();
-    if (dungeon === null) {
-      set({ error: "Generate a map before refining it" });
-      return;
-    }
-
-    // A procedurally built map has no plan, but it does have roles and tiers
-    // from the layout pass - enough to recover the plan it implies.
+    if (!dungeon) return;
+    const operation = beginDungeonOperation();
     const plan = blueprint ?? blueprintFromDungeon(dungeon);
-
-    let image: string | null = null;
-    try {
-      image = await renderDungeonDataUrl(dungeon);
-    } catch {
-      // A render failure costs the critic its eyes, not the whole request.
-      image = null;
-    }
-
-    const ctx = aiRequestContext(get().dungeonId, get().campaignId);
-    const sourcePrompt = (useChatStore.getState().chat?.messages ?? [])
-      .filter((m) => m.role === "user")
-      .map((m) => m.content)
-      .join("\n\n");
-
     set({ isRefining: true, error: null, refinement: null });
-
     try {
-      const res = await fetch("/api/refine-layout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          blueprint: plan,
-          dungeon,
-          image,
-          sourcePrompt,
-          instruction,
-          ...ctx,
-        }),
-      });
-      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let refinement: Refinement | null = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split(NEWLINE);
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
-          } catch {
-            continue;
-          }
-          if (typeof parsed.error === "string") {
-            set({ error: parsed.error });
-            continue;
-          }
-          if (parsed.blueprint !== undefined && parsed.blueprint !== null) {
-            refinement = {
+      const ctx = await prepareAI(operation);
+      let image: string | null = null;
+      try {
+        image = await renderDungeonDataUrl(dungeon);
+      } catch {
+        /* text-only critique */
+      }
+      operation.assert();
+      const sourcePrompt = ctx.conversationHistory
+        .filter((m) => m.role === "user")
+        .map((m) => m.content)
+        .join("\n\n");
+      for await (const parsed of events(
+        "/api/refine-layout",
+        { blueprint: plan, dungeon, image, sourcePrompt, instruction, ...ctx },
+        operation,
+      )) {
+        if (parsed.blueprint)
+          set({
+            refinement: {
               critique: String(parsed.critique ?? ""),
               blueprint: parsed.blueprint as Blueprint,
               changes: (parsed.changes as RefinementChange[]) ?? [],
               imageUsed: parsed.imageUsed === true,
-            };
-          }
-        }
+            },
+          });
       }
-
-      set({ refinement });
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : "Refinement failed" });
+      operationError(operation, err);
     } finally {
-      set({ isRefining: false });
+      operation.finish();
     }
   },
 
@@ -495,31 +482,46 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
     const { refinement, config } = get();
     if (refinement === null || config === null) return null;
 
-    set({ blueprint: refinement.blueprint, blueprintProblems: [], refinement: null });
+    set({
+      blueprint: refinement.blueprint,
+      blueprintProblems: [],
+      refinement: null,
+    });
     queueSave(get().dungeonId, { blueprint: refinement.blueprint });
 
     // A refined plan is a different dungeon, so it gets a fresh seed rather
     // than reusing one whose placement was solved for the old room set.
-    return applyGeneratedGeometry(
-      { ...config, seed: Math.floor(Math.random() * 2147483647) },
-      set,
-      get,
-    );
+    return (
+      await applyGeneratedGeometry(
+        { ...config, seed: Math.floor(Math.random() * 2147483647) },
+        set,
+        get,
+      )
+    ).fork;
   },
 
   generateDungeonFromConfig: async () => {
-    const { config } = get();
+    const { config, dungeonId } = get();
     if (config === null) return null;
-    const record = await applyGeneratedGeometry(config, set, get);
-
-    // A fork hands the caller a different dungeon and navigates away from this
-    // one, so describing the copy the store still holds would bill for text
-    // nobody ever sees. Only chain when the geometry landed in place.
-    if (record === null && useAIStore.getState().autoDescribe && get().dungeon !== null) {
-      await get().describeRooms();
-      await get().describeDungeon();
+    const epoch = loadEpoch;
+    const result = await applyGeneratedGeometry(config, set, get);
+    if (
+      result.ok &&
+      result.fork === null &&
+      epoch === loadEpoch &&
+      get().dungeonId === dungeonId &&
+      useAIStore.getState().autoDescribe
+    ) {
+      const described = await get().describeRooms();
+      if (
+        described &&
+        epoch === loadEpoch &&
+        get().dungeonId === dungeonId &&
+        !get().error
+      )
+        await get().describeDungeon();
     }
-    return record;
+    return result.fork;
   },
 
   /**
@@ -531,7 +533,9 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
     const { config } = get();
     if (config === null) return null;
     const newSeed = seed ?? Math.floor(Math.random() * 2147483647);
-    return applyGeneratedGeometry({ ...config, seed: newSeed }, set, get);
+    return (
+      await applyGeneratedGeometry({ ...config, seed: newSeed }, set, get)
+    ).fork;
   },
 
   /*
@@ -544,205 +548,131 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
    */
   describeRooms: async () => {
     const { dungeon, config } = get();
-    if (!dungeon || !config) return;
-    const ctx = aiRequestContext(get().dungeonId, get().campaignId);
-    const rooms = dungeon.rooms;
-    const total = rooms.length;
-
-    const batches: Room[][] = [];
-    for (let i = 0; i < rooms.length; i += DESCRIBE_BATCH_SIZE) {
-      batches.push(rooms.slice(i, i + DESCRIBE_BATCH_SIZE));
-    }
-
-    set({
-      isDescribingRooms: true,
-      error: null,
-      describeProgress: { current: 0, total, roomName: "", streamingText: "" },
-    });
-
-    let done = 0;
-    for (const batch of batches) {
-      const label = batch.length === 1
-        ? `Room ${batch[0]!.id}`
-        : `Rooms ${batch[0]!.id}-${batch[batch.length - 1]!.id}`;
-      set({ describeProgress: { current: done + 1, total, roomName: label, streamingText: "" } });
-
-      try {
-        const res = await fetch("/api/describe-rooms", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+    if (!dungeon || !config) return false;
+    const operation = beginDungeonOperation();
+    set({ isDescribingRooms: true, error: null });
+    try {
+      for (let i = 0; i < dungeon.rooms.length; i += DESCRIBE_BATCH_SIZE) {
+        const batch = dungeon.rooms.slice(i, i + DESCRIBE_BATCH_SIZE);
+        const ctx = await prepareAI(operation);
+        let streamingText = "";
+        const roomName = `Rooms ${batch.map((r) => r.id).join(", ")}`;
+        set({
+          describeProgress: {
+            current: i,
+            total: dungeon.rooms.length,
+            roomName,
+            streamingText,
+          },
+        });
+        for await (const parsed of events(
+          "/api/describe-rooms",
+          {
             rooms: batch,
             allRooms: dungeon.rooms,
             corridors: dungeon.corridors,
             config,
             ...ctx,
-          }),
-        });
-        if (!res.ok) {
-          const body = await res.text();
-          set({ error: `Failed on ${label}: ${body}` });
-          done += batch.length;
-          continue;
-        }
-        const reader = res.body?.getReader();
-        if (!reader) {
-          done += batch.length;
-          continue;
-        }
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let streamingText = "";
-        while (true) {
-          const { done: finished, value } = await reader.read();
-          if (finished) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            let parsed: Record<string, unknown>;
-            try {
-              parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
-            } catch {
-              continue;
-            }
-            if (parsed.error) {
-              set({ error: `AI error on ${label}: ${String(parsed.error)}` });
-              continue;
-            }
-            if (typeof parsed.text === "string") {
-              streamingText += parsed.text;
-              set({ describeProgress: { current: done + 1, total, roomName: label, streamingText } });
-            }
-            if (Array.isArray(parsed.descriptions)) {
-              // Positional: the narrator answers one object per input room, in
-              // order. Zipping by index is what the endpoint contract promises.
-              const descriptions = parsed.descriptions as RoomDescription[];
-              batch.forEach((room, i) => {
-                const description = descriptions[i];
-                if (description !== undefined) get().setRoomDescription(room.id, description);
-              });
-            }
+          },
+          operation,
+        )) {
+          if (typeof parsed.text === "string") {
+            streamingText += parsed.text;
+            set({
+              describeProgress: {
+                current: i,
+                total: dungeon.rooms.length,
+                roomName,
+                streamingText,
+              },
+            });
           }
+          if (Array.isArray(parsed.descriptions))
+            operation.commit(() => {
+              batch.forEach((room, index) => {
+                const description = (parsed.descriptions as RoomDescription[])[
+                  index
+                ];
+                if (description) get().setRoomDescription(room.id, description);
+              });
+            });
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Room description failed";
-        set({ error: `${label}: ${msg}` });
       }
-      done += batch.length;
-      set({ describeProgress: { current: Math.min(done, total), total, roomName: label, streamingText: "" } });
+      return true;
+    } catch (err) {
+      operationError(operation, err);
+      return false;
+    } finally {
+      operation.finish();
     }
-
-    set({ isDescribingRooms: false, describeProgress: null });
   },
 
-  describeRoom: async (roomId: number) => {
+  describeRoom: async (roomId) => {
     const { dungeon, config } = get();
-    if (!dungeon || !config) return;
-    const room = dungeon.rooms.find((r) => r.id === roomId);
-    if (!room) return;
-    const ctx = aiRequestContext(get().dungeonId, get().campaignId);
-    set({ error: null });
+    const room = dungeon?.rooms.find((r) => r.id === roomId);
+    if (!dungeon || !config || !room) return;
+    const operation = beginDungeonOperation();
+    set({
+      isDescribingRooms: true,
+      error: null,
+      describeProgress: {
+        current: 0,
+        total: 1,
+        roomName: `Room ${roomId}`,
+        streamingText: "",
+      },
+    });
     try {
-      const res = await fetch(`/api/describe-room/${roomId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const ctx = await prepareAI(operation);
+      for await (const parsed of events(
+        `/api/describe-room/${roomId}`,
+        {
           room,
           allRooms: dungeon.rooms,
           corridors: dungeon.corridors,
           config,
           ...ctx,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`Server error ${res.status}: ${body}`);
-      }
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
-          } catch {
-            continue;
-          }
-          if (parsed.error) {
-            set({ error: `AI error: ${parsed.error}` });
-            continue;
-          }
-          if (parsed.description) {
-            get().setRoomDescription(roomId, parsed.description as RoomDescription);
-          }
-        }
+        },
+        operation,
+      )) {
+        if (parsed.description)
+          operation.commit(() =>
+            get().setRoomDescription(
+              roomId,
+              parsed.description as RoomDescription,
+            ),
+          );
       }
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : "Room description failed" });
+      operationError(operation, err);
+    } finally {
+      operation.finish();
     }
   },
 
   describeDungeon: async () => {
     const { dungeon, config } = get();
     if (!dungeon || !config) return;
-    const ctx = aiRequestContext(get().dungeonId, get().campaignId);
+    const operation = beginDungeonOperation();
     set({ isDescribingDungeon: true, error: null });
     try {
-      const res = await fetch("/api/describe-dungeon", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rooms: dungeon.rooms,
-          corridors: dungeon.corridors,
-          config,
-          ...ctx,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`Server error ${res.status}: ${body}`);
-      }
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(line.slice(6)) as Record<string, unknown>;
-          } catch {
-            continue;
-          }
-          if (parsed.error) {
-            set({ error: `AI error: ${parsed.error}` });
-            continue;
-          }
-          if (parsed.description) {
-            get().setDungeonDescription(parsed.description as DungeonDescription);
-          }
-        }
+      const ctx = await prepareAI(operation);
+      for await (const parsed of events(
+        "/api/describe-dungeon",
+        { rooms: dungeon.rooms, corridors: dungeon.corridors, config, ...ctx },
+        operation,
+      )) {
+        if (parsed.description)
+          operation.commit(() =>
+            get().setDungeonDescription(
+              parsed.description as DungeonDescription,
+            ),
+          );
       }
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : "Dungeon description failed" });
+      operationError(operation, err);
     } finally {
-      set({ isDescribingDungeon: false });
+      operation.finish();
     }
   },
 
@@ -767,7 +697,11 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
     if (_undoStack.length === 0 || !dungeon) return;
     const prev = _undoStack[_undoStack.length - 1]!;
     const nextRedo = [dungeon, ..._redoStack].slice(0, 50);
-    set({ dungeon: prev, _undoStack: _undoStack.slice(0, -1), _redoStack: nextRedo });
+    set({
+      dungeon: prev,
+      _undoStack: _undoStack.slice(0, -1),
+      _redoStack: nextRedo,
+    });
     queueSave(dungeonId, { geometry: prev });
   },
 
@@ -776,11 +710,17 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
     if (_redoStack.length === 0 || !dungeon) return;
     const next = _redoStack[0]!;
     const nextUndo = [..._undoStack, dungeon].slice(-50);
-    set({ dungeon: next, _undoStack: nextUndo, _redoStack: _redoStack.slice(1) });
+    set({
+      dungeon: next,
+      _undoStack: nextUndo,
+      _redoStack: _redoStack.slice(1),
+    });
     queueSave(dungeonId, { geometry: next });
   },
 
-  reset: () =>
+  reset: () => {
+    dungeonOperations.cancel();
+    ++loadEpoch;
     set({
       config: null,
       dungeon: null,
@@ -789,8 +729,26 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       _undoStack: [],
       _redoStack: [],
       ...transientDefaults,
-    }),
+    });
+  },
 }));
+
+// Invalidate synchronously when navigation is published, before React effects
+// run. A room selection inside the same owner does not cancel a batch.
+if (typeof window !== "undefined") {
+  subscribeNavigation(() => {
+    const route = parseRoute(window.location.pathname);
+    const owner = useDungeonStore.getState();
+    if (
+      owner.dungeonId !== null &&
+      (route.view !== "dungeon" ||
+        route.dungeonId !== owner.dungeonId ||
+        route.campaignId !== owner.campaignId)
+    ) {
+      owner.closeDungeon();
+    }
+  });
+}
 
 /**
  * Build geometry from a config and put it somewhere safe.
@@ -812,7 +770,11 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
 function aiRequestContext(dungeonId: number | null, campaignId: number | null) {
   const { temperature, provider, model, thinkingLevel, captureReasoning } =
     useAIStore.getState();
-  const chat = useChatStore.getState().chat;
+  const candidate = useChatStore.getState().chat;
+  const chat =
+    candidate?.dungeonId === dungeonId && candidate?.campaignId === campaignId
+      ? candidate
+      : null;
 
   return {
     temperature,
@@ -834,49 +796,54 @@ async function applyGeneratedGeometry(
   config: DungeonConfig,
   set: (partial: Partial<DungeonState>) => void,
   get: () => DungeonState,
-): Promise<DungeonRecord | null> {
+): Promise<{ ok: boolean; fork: DungeonRecord | null }> {
   const { dungeonId, roomDescriptions, blueprint } = get();
+  const operation = beginDungeonOperation();
   set({ isGeneratingDungeon: true, error: null });
-
   try {
+    const ctx = await prepareAI(operation);
     const res = await fetch("/api/generate-dungeon", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ config, blueprint }),
+      body: JSON.stringify({ config, blueprint, ...ctx }),
+      signal: operation.signal,
     });
     if (!res.ok) throw new Error(`Server responded with ${res.status}`);
     const data = (await res.json()) as { dungeon: Dungeon };
-
+    operation.assert();
     if (dungeonId !== null && roomDescriptions.size > 0) {
-      await writePending();
-      return await api.dungeons.fork(dungeonId, {
+      const fork = await api.dungeons.fork(dungeonId, {
         seed: config.seed ?? null,
         config,
         geometry: data.dungeon,
         blueprint,
+        expectedRevision: dungeonSaves.revision(dungeonId),
       });
+      operation.assert();
+      return { ok: true, fork };
     }
-
-    set({
-      config,
-      dungeon: data.dungeon,
-      roomDescriptions: new Map(),
-      dungeonDescription: null,
-      _undoStack: [],
-      _redoStack: [],
+    operation.commit(() => {
+      set({
+        config,
+        dungeon: data.dungeon,
+        roomDescriptions: new Map(),
+        dungeonDescription: null,
+        _undoStack: [],
+        _redoStack: [],
+      });
+      queueSave(dungeonId, {
+        config,
+        seed: config.seed ?? null,
+        geometry: data.dungeon,
+        overview: null,
+        blueprint,
+      });
     });
-    queueSave(dungeonId, {
-      config,
-      seed: config.seed ?? null,
-      geometry: data.dungeon,
-      overview: null,
-      blueprint,
-    });
-    return null;
+    return { ok: true, fork: null };
   } catch (err) {
-    set({ error: err instanceof Error ? err.message : "Dungeon generation failed" });
-    return null;
+    operationError(operation, err);
+    return { ok: false, fork: null };
   } finally {
-    set({ isGeneratingDungeon: false });
+    operation.finish();
   }
 }

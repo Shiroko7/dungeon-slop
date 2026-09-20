@@ -1,5 +1,58 @@
 # Dungeon Slop — Task Tracker
 
+Updated 2026-09-20. [ROADMAP.md](ROADMAP.md) is the authoritative plan, including
+scope, dependencies, and acceptance criteria. This file tracks execution. The
+September review and roadmap are complete. M1.1 is implemented on its review branch,
+with automated checks passing; browser verification is pending. See the
+[M1.1 review guide](docs/M1.1-REVIEW.md) for limits and remaining checks.
+
+## Next: milestone 1 in four PRs
+
+Review and merge one complete behavior at a time. Include its UI, API, persistence,
+migrations, and regression tests together; do not open one PR per checkbox.
+
+| Order | PR / review unit | Status | Depends on |
+| --- | --- | --- | --- |
+| M1.1 | Reliable requests, saves, and local data ownership | DRAFT — browser verification pending | — |
+| M1.2 | Safe drafts, authored revisions, and generation/fork adoption | PLANNED | M1.1 |
+| M1.3 | Consistent geometry, features, and connectivity after edits | PLANNED | M1.1 + M1.2 |
+| M1.4 | Atomic, recoverable note ingestion | PLANNED | M1.1 |
+
+M1.4 is otherwise independent; the default order remains M1.1 → M1.2 → M1.3 → M1.4
+to keep review sequential. The detailed PR contracts are in
+[milestone 1](ROADMAP.md#m1--protect-work).
+
+- [ ] **M1.1:** owner/revision-bound operations; stale-load guards; cancellation;
+      ordered, acknowledged, recoverable saves; conflict/recovery UI; API ownership
+      validation; loopback listener; regression scenarios and migration checks.
+- [ ] **M1.2:** room-specific drafts and native text undo; persisted authorship
+      checkpoints; safe new versions for Generate/Reroll/Refine; preserved original
+      plans; visible fork adoption; schema/room-ID validation; safe chat editing;
+      reachable describe-missing action; failure and retry scenarios.
+- [ ] **M1.3:** reconcile cells, room footprints, features, corridor endpoints,
+      connections, walls, and reports; interpolate strokes; define room split/merge
+      identity and content recovery; consistent undo/reload/rendering; edit invariants.
+- [ ] **M1.4:** stored source revisions; unchanged-upload no-op; staged atomic index
+      replacement; concurrency/model checks; separate summary retries; correct
+      backfill; bounded uploads; visible notes providers; legacy-preserving migration.
+- [ ] **M1 exit gate:** all package acceptance scenarios pass, schema upgrades retain
+      existing data, recovery limits are documented, and README claims match delivery.
+
+## Subsequent milestones
+
+The groupings below are provisional until the milestone is scheduled. Keep related
+changes together and update the roadmap if evidence changes scope.
+
+| Milestone | Proposed packages | Status |
+| --- | --- | --- |
+| M2 — Complete the defining workflow | M2.1 reader/retrieval/evaluation; M2.2 Loremaster; M2.3 grounded Architect/Narrator | PLANNED |
+| M3 — Make it comfortable at the table | M3.1 exports; M3.2 creation/workspace/accessibility; M3.3 library/recovery; M3.4 providers/usage | PLANNED |
+| M4 — Expand after measuring | Themes; encounter/session preparation; connected levels; measured Rust/WASM acceleration | CANDIDATES |
+
+Known export disclosure/format defects are tracked under M3.1 and remain unresolved.
+Treat current exports as GM material and inspect before sharing. A focused urgent
+correction can move earlier without pulling in the entire export redesign.
+
 ## The model
 
 One tree, and everything is inside it:
@@ -19,12 +72,17 @@ Ownership rules, enforced by foreign keys:
 1. Nothing exists outside a campaign.
 2. Deleting a campaign deletes its notes, chunks, embeddings, dungeons, room
    notes, chats and messages — one cascade, no orphans.
-3. Notes are campaign-scoped, never dungeon-scoped. A dungeon *reads* its
-   campaign's notes; it never owns them.
+3. Notes are campaign-scoped, never dungeon-scoped. A dungeon never owns them;
+   having the Architect/Narrator read them is planned in M2.
 4. A dungeon owns its rooms. Rooms are never shared.
 5. Chats own nothing. Deleting one loses the transcript and nothing else.
 
-Design write-up: https://claude.ai/code/artifact/0feddc27-c869-429c-806c-a14353584687
+Usage events are an intentional exception: owner references become null on deletion
+so the accounting ledger survives. New recovery/history rows must have explicit
+ownership and retention rules.
+
+Historical design write-up:
+https://claude.ai/code/artifact/0feddc27-c869-429c-806c-a14353584687
 
 ---
 
@@ -32,53 +90,55 @@ Design write-up: https://claude.ai/code/artifact/0feddc27-c869-429c-806c-a143535
 
 ```sh
 bun run dev      # API (Bun.serve) on :3000 + vite on :5173, /api proxied
-bun test         # 928 pass, 0 fail
+bun test
 bun x tsc --noEmit
 bun run build
 ```
 
-`bun` is at `%USERPROFILE%\.bun\bin\bun.exe` and is **not** on PATH in non-interactive
-shells. `concurrently` spawns two bun processes, so killing one leaves the other bound to
-its port — kill by port when restarting. Health-check both, since a green vite says nothing
-about the API:
+Review baseline, 2026-09-19: **1,288 Bun tests across 14 files, 28 Rust tests, no
+failures; type checking and build pass.** The reproduced workflow bugs were outside
+that coverage. Browser verification was unavailable during the review and remains
+required for implementation changes involving UI behavior.
+
+For changes to Rust or shared generation/conformance contracts, also run
+`cargo test --manifest-path rust/Cargo.toml`.
+
+`bun` is at `%USERPROFILE%\.bun\bin\bun.exe` if a shell cannot find it on PATH.
+`concurrently` spawns two bun processes, so killing one can leave the other bound to
+its port. Check process ownership before stopping a server. Health-check both,
+since a green vite says nothing about the API:
 
 ```sh
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5173
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/api/campaigns
 ```
 
-State lives in `notes.sqlite` at the repo root, not in localStorage. Full verification
-recipes are in `.claude/skills/verify/SKILL.md`.
+Committed state lives in `notes.sqlite` at the repo root. Never use it as a fixture
+for destructive tests or migrations. Use isolated temporary/in-memory databases and
+mocked providers. Local verification recipes are in `.claude/skills/verify/SKILL.md`;
+PR-level acceptance requirements are in [the roadmap](ROADMAP.md#verification-and-pr-handoff).
 
 ---
 
-## Phase status
+## Implemented foundations and current gaps
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 0 | Project Scaffold | DONE |
-| 1A | AI Provider layer | DONE |
-| 1B | AI Architect layer | DONE |
-| 2A | BSP Engine | DONE |
-| 2B | Cellular Automata Engine | DONE |
-| 2C | Corridors & Features | DONE |
-| 2D | Engine Test Suite | DONE |
-| 3A | Canvas Renderer & Themes | PARTIAL — two render paths that can disagree |
-| 3B | Room Interaction | DONE |
-| 4 | Content Generation | DONE |
-| 5A | Export Pipeline | DONE |
-| 5C | Canvas Map Editor | DONE |
-| 6A | Note ingest — chunk, embed, summarize | DONE |
-| 7A | Schema v2 + migration | DONE |
-| 7B | Router, rail, campaign CRUD | DONE |
-| 7C | Dungeons as rows, reroll-as-fork | DONE |
-| 7D | Notes as a campaign-scoped page | DONE |
-| **7E** | **Hybrid retrieval (BM25 + vector, RRF)** | **NOT STARTED — costs no API credit** |
-| 7F | Loremaster agent — tool runner, citations | NOT STARTED — spends credit |
-| 7G | Architect reads campaign notes | NOT STARTED — spends credit |
-
-Suite: **928 tests, 0 failures, 0 type errors.** There is no known-bad baseline left to
-discount — any failure is a regression.
+| Area | Current state | Follow-up |
+| --- | --- | --- |
+| BSP/cellular generation, corridors, shapes, features | Implemented, with invariant tests | Preserve guarantees through edits; M1.3 |
+| AI config, blueprint, narration, refinement | Implemented, not connected to campaign retrieval | Ownership/authorship in M1; grounding in M2 |
+| Campaign/dungeon/chat ownership and migrations | Implemented; current schema version is 4 | Revision/recovery migrations in M1 |
+| SQLite persistence and autosave | Implemented, with reproduced failure/race defects | M1.1 |
+| Reroll-as-fork and manual descriptions | Implemented with preservation/adoption gaps | M1.2 |
+| Canvas editor | Implemented; derived data can become inconsistent | M1.3 |
+| Note ingestion and campaign note library | Implemented; replacement/deduplication/retry gaps | M1.4 |
+| Shared static renderer | Live map and exports share `renderStaticLayers` | Keep it shared |
+| Visual motifs | Default, Infernal, Aquatic have palettes; five fall back | M4.1 |
+| PNG/PDF/VTT and description exports | Implemented; correctness/audience/size gaps | M3.1 |
+| Hybrid retrieval (former 7E) | Not implemented | M2.1 |
+| Loremaster answers (former 7F) | Questions persist; answering not implemented | M2.2 |
+| Architect reads notes (former 7G) | Not implemented | M2.3 |
+| Usage ledger | Generation tokens tracked; cloud rates unset; notes calls missing | M3.4 |
+| Rust/WASM | PRNG/types/grid ported; production generator remains TypeScript | M4.4 after profiling |
 
 ---
 
@@ -90,7 +150,7 @@ discount — any failure is a regression.
 | Campaign / dungeon / chat accessors | `src/campaign/` |
 | Note ingest, chunking, embeddings | `src/notes/` |
 | HTTP handlers + route table | `src/api/` |
-| Client router (hand-rolled, 6 routes) | `src/router/router.ts` |
+| Client router | `src/router/router.ts` |
 | Typed client for the API | `src/store/api.ts` |
 | Rail / context column / views | `src/components/layout/`, `src/components/views/` |
 | Server entry point | `src/server.ts` |
@@ -102,66 +162,20 @@ shared types in `src/campaign/types.ts` (type-only, no runtime imports).
 
 ---
 
-## Open tasks
+## Operational follow-up
 
-### NEXT — the feature this was all for
-
-- [ ] **7E — Hybrid retrieval.** BM25 over the existing FTS5 index + brute-force
-      cosine over `embeddings`, fused with reciprocal rank fusion
-      (`1/(60+rank)`), plus neighbour expansion on `chunks.ordinal`. Scoped by
-      `campaign_id`. Expose as a CLI first so recall is provable before a model
-      sees it. **No API calls.**
-- [ ] **7F — Loremaster.** Tool runner with `list_documents`, `search_notes`,
-      `read_document`. SSE into the existing `ChatThread`; citations already
-      have a schema, a store field and a rendered form. Remove the placeholder
-      banner in `ChatView.tsx` when this lands.
-- [ ] **7G — Architect gets `search_notes`,** scoped to the parent campaign.
-      "Build the crypt under Vess the way my session notes describe it."
-
-### SIGNIFICANT — pre-existing bugs, still open
-
-- [ ] **VTT door bounds are identical on both ternary branches**
-      (`src/export/vtt-export.ts:253-266`) — the `isHorizontal` ternary returns
-      the same four points either way, so horizontal and vertical doors export
-      the same rectangle. Only `rotation` differs.
-- [ ] **5 of 8 motifs have no palette.** `themeMap` in
-      `src/renderer/themes/theme-engine.ts:25` covers Default, Infernal and
-      Aquatic; Natural, Arcane, Undead, Mechanical and Frozen fall through
-      `?? defaultTheme` silently, so choosing them looks like it did nothing.
-- [ ] **Two render paths that can disagree.** `renderDungeon()` exists in
-      `src/renderer/canvas-renderer.ts:168`, but `DungeonCanvas` draws inline
-      with its own `ctx` calls. It does read the theme via `getTheme`, so this
-      is duplication rather than a bypass — but the canvas and the PNG export
-      are separate implementations and drift is unnoticed until they differ.
-
-### MINOR
-
-- [ ] **`src/index.ts` is dead code.** The old `Bun.build` frontend bundler,
-      superseded by Vite. Nothing imports it, though `package.json`'s `"module"`
-      field still points at it. Delete it and repoint the field.
-- [ ] Two dead CSS section headers (`/* ===== SIDEBAR ===== */`,
-      `/* ── Session history ── */`) sit above the chat rules in `index.css`
-      with no rules under them, left over from the components that were removed.
-- [ ] Chats cannot be renamed — a thread takes its title from the first user
-      message and keeps it.
-- [ ] Notes view has no document reader — you can see a summary and chunk count
-      but not the text.
-- [ ] No search across a campaign's dungeons or chats.
-- [ ] Bundle is 757 kB; `jspdf` + `html2canvas` are the bulk and could be
-      loaded on demand at the export click.
-- [ ] No README. The project has no front door for anyone arriving cold, which
-      matters for something being shown as portfolio work.
-
-### SECURITY
-
-- [ ] **Rotate `ANTHROPIC_API_KEY`.** It was printed in full into session output
-      by a pre-commit hook bug, and Claude Code transcripts persist under
-      `~/.claude/projects/`. `GEMINI_API_KEY` has already been rotated.
-      Never prefix a secret with `VITE_` — Vite inlines those into the client bundle.
+- [ ] **Verify rotation of the previously exposed `ANTHROPIC_API_KEY`.** The old
+      tracker recorded a full key printed by a pre-commit hook and retained in local
+      transcripts. Rotation was not verified in the review. Do not print keys or
+      search transcripts to rediscover the exposed value. Never prefix a secret
+      with `VITE_`, which makes it eligible for inclusion in the client bundle.
 
 ---
 
-## Done in this pass
+## Historical implementation decisions
+
+These record the earlier restructure, not completion of the new roadmap. Preservation
+and autosave guarantees below have the gaps now assigned to M1.1/M1.2.
 
 - Schema v2: `campaigns`, `dungeons`, `room_notes`, `chats`, `messages`;
   `documents` rebuilt with `campaign_id` and `UNIQUE (campaign_id, filename)`.

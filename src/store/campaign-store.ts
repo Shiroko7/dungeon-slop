@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { api } from "./api.ts";
-import type { Campaign, ChatSummary, DungeonSummary } from "../campaign/types.ts";
+import type {
+  Campaign,
+  ChatSummary,
+  DungeonSummary,
+} from "../campaign/types.ts";
 
 /**
  * The campaign list and whichever campaign is open.
@@ -36,6 +40,10 @@ function message(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
+let contentsEpoch = 0;
+let listEpoch = 0;
+let requestedCampaign: number | null = null;
+
 export const useCampaignStore = create<CampaignState>()((set, get) => ({
   campaigns: [],
   isLoading: false,
@@ -48,16 +56,24 @@ export const useCampaignStore = create<CampaignState>()((set, get) => ({
 
   setError: (error) => set({ error }),
 
-  clearActive: () => set({ active: null, dungeons: [], chats: [] }),
+  clearActive: () => {
+    ++contentsEpoch;
+    requestedCampaign = null;
+    set({ active: null, dungeons: [], chats: [], isLoadingContents: false });
+  },
 
   fetchCampaigns: async () => {
-    set({ isLoading: true });
+    const epoch = ++listEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === listEpoch) set(partial);
+    };
+    update({ isLoading: true });
     try {
-      set({ campaigns: await api.campaigns.list(), error: null });
+      update({ campaigns: await api.campaigns.list(), error: null });
     } catch (err) {
-      set({ error: message(err, "Could not load campaigns") });
+      update({ error: message(err, "Could not load campaigns") });
     } finally {
-      set({ isLoading: false });
+      update({ isLoading: false });
     }
   },
 
@@ -67,42 +83,70 @@ export const useCampaignStore = create<CampaignState>()((set, get) => ({
    * states for one navigation.
    */
   openCampaign: async (id) => {
-    if (get().active?.id !== id) set({ active: null, dungeons: [], chats: [] });
-    set({ isLoadingContents: true });
+    requestedCampaign = id;
+    const epoch = ++contentsEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === contentsEpoch) set(partial);
+    };
+    if (get().active?.id !== id)
+      update({ active: null, dungeons: [], chats: [] });
+    update({ isLoadingContents: true });
     try {
       const [campaign, dungeons, chats] = await Promise.all([
         api.campaigns.get(id),
         api.dungeons.list(id),
         api.chats.list(id),
       ]);
-      set({ active: campaign, dungeons, chats, error: null });
-      return campaign;
+      update({ active: campaign, dungeons, chats, error: null });
+      return epoch === contentsEpoch ? campaign : null;
     } catch (err) {
-      set({ error: message(err, "Could not open that campaign"), active: null });
+      update({
+        error: message(err, "Could not open that campaign"),
+        active: null,
+      });
       return null;
     } finally {
-      set({ isLoadingContents: false });
+      update({ isLoadingContents: false });
     }
   },
 
   /** Re-read the lists without the full-page loading state — used after a write. */
   refreshContents: async (id) => {
+    if (requestedCampaign !== id) return;
+    const epoch = ++contentsEpoch;
+    const update: typeof set = (partial) => {
+      if (epoch === contentsEpoch) set(partial);
+    };
     try {
       const [campaign, dungeons, chats] = await Promise.all([
         api.campaigns.get(id),
         api.dungeons.list(id),
         api.chats.list(id),
       ]);
-      set({ active: campaign, dungeons, chats });
+      update({
+        active: campaign,
+        dungeons,
+        chats,
+        isLoadingContents: false,
+        error: null,
+      });
     } catch (err) {
-      set({ error: message(err, "Could not refresh the campaign") });
+      update({
+        error: message(err, "Could not refresh the campaign"),
+        isLoadingContents: false,
+      });
     }
   },
 
   createCampaign: async (name, blurb) => {
     try {
       const campaign = await api.campaigns.create({ name, blurb });
-      set((state) => ({ campaigns: [campaign, ...state.campaigns], error: null }));
+      ++listEpoch;
+      set((state) => ({
+        campaigns: [campaign, ...state.campaigns],
+        isLoading: false,
+        error: null,
+      }));
       return campaign;
     } catch (err) {
       set({ error: message(err, "Could not create that campaign") });
@@ -115,54 +159,77 @@ export const useCampaignStore = create<CampaignState>()((set, get) => ({
    * the cascade is in the schema, so this only has to refresh what is on screen.
    */
   deleteDungeon: async (id) => {
+    const owner = requestedCampaign;
     const campaignId = get().active?.id ?? null;
     try {
       await api.dungeons.remove(id);
-      set((state) => ({ dungeons: state.dungeons.filter((d) => d.id !== id), error: null }));
+      if (requestedCampaign === campaignId) ++contentsEpoch;
+      set((state) => ({
+        dungeons: state.dungeons.filter((d) => d.id !== id),
+        error: requestedCampaign === owner ? null : state.error,
+      }));
       if (campaignId !== null) void get().refreshContents(campaignId);
       return true;
     } catch (err) {
-      set({ error: message(err, "Could not delete that dungeon") });
+      if (requestedCampaign === owner)
+        set({ error: message(err, "Could not delete that dungeon") });
       return false;
     }
   },
 
   deleteChat: async (id) => {
+    const owner = requestedCampaign;
     const campaignId = get().active?.id ?? null;
     try {
       await api.chats.remove(id);
-      set((state) => ({ chats: state.chats.filter((c) => c.id !== id), error: null }));
+      if (requestedCampaign === campaignId) ++contentsEpoch;
+      set((state) => ({
+        chats: state.chats.filter((c) => c.id !== id),
+        error: requestedCampaign === owner ? null : state.error,
+      }));
       if (campaignId !== null) void get().refreshContents(campaignId);
       return true;
     } catch (err) {
-      set({ error: message(err, "Could not delete that thread") });
+      if (requestedCampaign === owner)
+        set({ error: message(err, "Could not delete that thread") });
       return false;
     }
   },
 
   renameCampaign: async (id, name) => {
+    const owner = requestedCampaign;
     try {
       const campaign = await api.campaigns.update(id, { name });
       set((state) => ({
         campaigns: state.campaigns.map((c) => (c.id === id ? campaign : c)),
         active: state.active?.id === id ? campaign : state.active,
-        error: null,
+        error: requestedCampaign === owner ? null : state.error,
       }));
     } catch (err) {
-      set({ error: message(err, "Could not rename that campaign") });
+      if (requestedCampaign === owner)
+        set({ error: message(err, "Could not rename that campaign") });
     }
   },
 
   deleteCampaign: async (id) => {
+    const owner = requestedCampaign;
     try {
       await api.campaigns.remove(id);
+      ++listEpoch;
+      if (requestedCampaign === id) {
+        ++contentsEpoch;
+        requestedCampaign = null;
+      }
       set((state) => ({
         campaigns: state.campaigns.filter((c) => c.id !== id),
-        ...(state.active?.id === id ? { active: null, dungeons: [], chats: [] } : {}),
-        error: null,
+        ...(state.active?.id === id
+          ? { active: null, dungeons: [], chats: [] }
+          : {}),
+        error: requestedCampaign === owner ? null : state.error,
       }));
     } catch (err) {
-      set({ error: message(err, "Could not delete that campaign") });
+      if (requestedCampaign === owner)
+        set({ error: message(err, "Could not delete that campaign") });
     }
   },
 }));

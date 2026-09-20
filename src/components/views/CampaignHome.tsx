@@ -1,7 +1,12 @@
 import { useCallback, useState } from "react";
 import { useCampaignStore } from "../../store/campaign-store.ts";
 import { api } from "../../store/api.ts";
-import { linkProps, navigate, paths } from "../../router/router.ts";
+import {
+  captureNavigation,
+  linkProps,
+  navigate,
+  paths,
+} from "../../router/router.ts";
 import { LoadingSpinner } from "../shared/LoadingSpinner.tsx";
 import { countLine, useConfirm } from "../shared/ConfirmDialog.tsx";
 
@@ -37,11 +42,19 @@ export function CampaignHome({ campaignId }: { campaignId: number }) {
 
   const newDungeon = useCallback(async () => {
     if (busy) return;
+    const stillHere = captureNavigation();
     setBusy(true);
     try {
-      const dungeon = await api.dungeons.create(campaignId, { name: "Untitled map" });
+      const dungeon = await api.dungeons.create(campaignId, {
+        name: "Untitled map",
+      });
       await refreshContents(campaignId);
-      navigate(paths.dungeon(campaignId, dungeon.id));
+      if (stillHere()) navigate(paths.dungeon(campaignId, dungeon.id));
+    } catch (err) {
+      if (stillHere())
+        useCampaignStore
+          .getState()
+          .setError(err instanceof Error ? err.message : "Could not create");
     } finally {
       setBusy(false);
     }
@@ -49,11 +62,17 @@ export function CampaignHome({ campaignId }: { campaignId: number }) {
 
   const newChat = useCallback(async () => {
     if (busy) return;
+    const stillHere = captureNavigation();
     setBusy(true);
     try {
       const chat = await api.chats.create(campaignId);
       await refreshContents(campaignId);
-      navigate(paths.chat(campaignId, chat.id));
+      if (stillHere()) navigate(paths.chat(campaignId, chat.id));
+    } catch (err) {
+      if (stillHere())
+        useCampaignStore
+          .getState()
+          .setError(err instanceof Error ? err.message : "Could not create");
     } finally {
       setBusy(false);
     }
@@ -113,7 +132,8 @@ export function CampaignHome({ campaignId }: { campaignId: number }) {
   const commitName = useCallback(() => {
     const trimmed = nameDraft.trim();
     setEditingName(false);
-    if (trimmed !== "" && trimmed !== active?.name) void renameCampaign(campaignId, trimmed);
+    if (trimmed !== "" && trimmed !== active?.name)
+      void renameCampaign(campaignId, trimmed);
   }, [nameDraft, active?.name, campaignId, renameCampaign]);
 
   if (active === null) {
@@ -183,27 +203,45 @@ export function CampaignHome({ campaignId }: { campaignId: number }) {
         <div className="home-cards">
           {dungeons.map((d) => (
             <div key={d.id} className="home-card-wrap">
-              <a className="home-card" {...linkProps(paths.dungeon(campaignId, d.id))}>
+              <a
+                className="home-card"
+                {...linkProps(paths.dungeon(campaignId, d.id))}
+              >
                 <span className="home-card-name">{d.name}</span>
                 <span className="home-card-meta">
                   {d.hasGeometry ? `${d.roomCount} rooms` : "no map yet"}
                   {d.describedCount > 0 && ` · ${d.describedCount} written`}
                 </span>
-                {d.parentId !== null && <span className="home-card-tag">fork</span>}
-                <span className="home-card-time">{relativeTime(d.updatedAt)}</span>
+                {d.parentId !== null && (
+                  <span className="home-card-tag">fork</span>
+                )}
+                <span className="home-card-time">
+                  {relativeTime(d.updatedAt)}
+                </span>
               </a>
               <button
                 className="home-card-remove"
                 title={`Delete ${d.name}`}
                 aria-label={`Delete ${d.name}`}
-                onClick={() => void removeDungeon(d.id, d.name, d.roomCount, d.describedCount)}
+                onClick={() =>
+                  void removeDungeon(
+                    d.id,
+                    d.name,
+                    d.roomCount,
+                    d.describedCount,
+                  )
+                }
               >
                 &times;
               </button>
             </div>
           ))}
 
-          <button className="home-card home-card--new" onClick={() => void newDungeon()} disabled={busy}>
+          <button
+            className="home-card home-card--new"
+            onClick={() => void newDungeon()}
+            disabled={busy}
+          >
             <span className="home-new-plus">+</span>
             <span className="home-new-label">New dungeon</span>
           </button>
@@ -223,7 +261,10 @@ export function CampaignHome({ campaignId }: { campaignId: number }) {
           <ul className="home-list">
             {chats.map((c) => (
               <li key={c.id} className="home-list-row">
-                <a className="home-list-item" {...linkProps(paths.chat(campaignId, c.id))}>
+                <a
+                  className="home-list-item"
+                  {...linkProps(paths.chat(campaignId, c.id))}
+                >
                   <span className="home-list-name">
                     {c.title === "" ? "Untitled thread" : c.title}
                   </span>
@@ -244,7 +285,11 @@ export function CampaignHome({ campaignId }: { campaignId: number }) {
           </ul>
         )}
 
-        <button className="home-inline-action" onClick={() => void newChat()} disabled={busy}>
+        <button
+          className="home-inline-action"
+          onClick={() => void newChat()}
+          disabled={busy}
+        >
           + New chat
         </button>
       </section>
@@ -255,7 +300,10 @@ export function CampaignHome({ campaignId }: { campaignId: number }) {
           Deleting this campaign removes its notes, dungeons and chats together.
           Nothing is kept, and there is no undo.
         </p>
-        <button className="home-danger-action" onClick={() => void removeCampaign()}>
+        <button
+          className="home-danger-action"
+          onClick={() => void removeCampaign()}
+        >
           Delete campaign
         </button>
       </section>

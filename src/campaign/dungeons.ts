@@ -1,12 +1,22 @@
 import type { Blueprint } from "../ai/blueprint.ts";
 import type { Database } from "bun:sqlite";
 import type { DungeonConfig } from "../ai/schema.ts";
-import type { Dungeon, DungeonDescription, RoomDescription } from "../engine/types.ts";
+import type {
+  Dungeon,
+  DungeonDescription,
+  RoomDescription,
+} from "../engine/types.ts";
 import { touchCampaign } from "./campaigns.ts";
-import type { DungeonInput, DungeonPatch, DungeonRecord, DungeonSummary } from "./types.ts";
+import type {
+  DungeonInput,
+  DungeonPatch,
+  DungeonRecord,
+  DungeonSummary,
+} from "./types.ts";
 
 interface SummaryRow {
   id: number;
+  revision: number;
   campaign_id: number;
   parent_id: number | null;
   name: string;
@@ -32,7 +42,7 @@ interface RecordRow extends SummaryRow {
  * scan costs nothing worth saving.
  */
 const SUMMARY_COLUMNS = `
-  d.id, d.campaign_id, d.parent_id, d.name, d.seed, d.created_at, d.updated_at,
+  d.id, d.revision, d.campaign_id, d.parent_id, d.name, d.seed, d.created_at, d.updated_at,
   CASE WHEN d.geometry IS NULL THEN 0
        ELSE json_array_length(d.geometry, '$.rooms') END AS room_count,
   (SELECT COUNT(*) FROM room_notes r WHERE r.dungeon_id = d.id) AS described_count,
@@ -52,6 +62,7 @@ function parseJson<T>(raw: string | null): T | null {
 function toSummary(row: SummaryRow): DungeonSummary {
   return {
     id: row.id,
+    revision: row.revision,
     campaignId: row.campaign_id,
     parentId: row.parent_id,
     name: row.name,
@@ -64,7 +75,10 @@ function toSummary(row: SummaryRow): DungeonSummary {
   };
 }
 
-export function listDungeons(db: Database, campaignId: number): DungeonSummary[] {
+export function listDungeons(
+  db: Database,
+  campaignId: number,
+): DungeonSummary[] {
   const rows = db
     .query(
       `SELECT ${SUMMARY_COLUMNS} FROM dungeons d
@@ -74,7 +88,10 @@ export function listDungeons(db: Database, campaignId: number): DungeonSummary[]
   return rows.map(toSummary);
 }
 
-export function listRoomNotes(db: Database, dungeonId: number): Array<[number, RoomDescription]> {
+export function listRoomNotes(
+  db: Database,
+  dungeonId: number,
+): Array<[number, RoomDescription]> {
   const rows = db
     .query(
       "SELECT room_index, description FROM room_notes WHERE dungeon_id = ? ORDER BY room_index",
@@ -133,11 +150,14 @@ export function createDungeon(
       now,
     ],
   );
-  const id = Number((db.query("SELECT last_insert_rowid() AS id").get() as { id: number }).id);
+  const id = Number(
+    (db.query("SELECT last_insert_rowid() AS id").get() as { id: number }).id,
+  );
   touchCampaign(db, campaignId);
 
   const created = getDungeon(db, id);
-  if (created === null) throw new Error(`Dungeon ${id} vanished immediately after insert`);
+  if (created === null)
+    throw new Error(`Dungeon ${id} vanished immediately after insert`);
   return created;
 }
 
@@ -146,10 +166,14 @@ export function createDungeon(
  * explicit `null` clears it. That distinction is what lets the autosave send
  * only the geometry after an edit without wiping the config alongside it.
  */
-export function updateDungeon(db: Database, id: number, patch: DungeonPatch): DungeonRecord | null {
-  const row = db.query("SELECT campaign_id FROM dungeons WHERE id = ?").get(id) as
-    | { campaign_id: number }
-    | null;
+export function updateDungeon(
+  db: Database,
+  id: number,
+  patch: DungeonPatch,
+): DungeonRecord | null {
+  const row = db
+    .query("SELECT campaign_id FROM dungeons WHERE id = ?")
+    .get(id) as { campaign_id: number } | null;
   if (row === null) return null;
 
   const sets: string[] = [];
@@ -169,19 +193,24 @@ export function updateDungeon(db: Database, id: number, patch: DungeonPatch): Du
     sets.push("seed = ?");
     values.push(patch.seed);
   }
-  if (patch.parentId !== undefined) {
-    sets.push("parent_id = ?");
-    values.push(patch.parentId);
-  }
   if (patch.config !== undefined) pushJson("config", patch.config);
   if (patch.geometry !== undefined) pushJson("geometry", patch.geometry);
   if (patch.overview !== undefined) pushJson("overview", patch.overview);
   if (patch.blueprint !== undefined) pushJson("blueprint", patch.blueprint);
 
-  if (sets.length > 0) {
+  for (const [roomId, description] of patch.roomNotes ?? []) {
+    if (description === null) deleteRoomNote(db, id, roomId);
+    else upsertRoomNote(db, id, roomId, description);
+  }
+
+  if (sets.length > 0 || patch.roomNotes !== undefined) {
+    sets.push("revision = revision + 1");
     sets.push("updated_at = ?");
     values.push(Date.now(), id);
-    db.run(`UPDATE dungeons SET ${sets.join(", ")} WHERE id = ?`, values as never[]);
+    db.run(
+      `UPDATE dungeons SET ${sets.join(", ")} WHERE id = ?`,
+      values as never[],
+    );
     touchCampaign(db, row.campaign_id);
   }
 
@@ -189,9 +218,9 @@ export function updateDungeon(db: Database, id: number, patch: DungeonPatch): Du
 }
 
 export function deleteDungeon(db: Database, id: number): boolean {
-  const row = db.query("SELECT campaign_id FROM dungeons WHERE id = ?").get(id) as
-    | { campaign_id: number }
-    | null;
+  const row = db
+    .query("SELECT campaign_id FROM dungeons WHERE id = ?")
+    .get(id) as { campaign_id: number } | null;
   if (row === null) return false;
   db.run("DELETE FROM dungeons WHERE id = ?", [id]);
   touchCampaign(db, row.campaign_id);
@@ -236,7 +265,11 @@ export function forkDungeon(
  * "Crypt of Vess" → "Crypt of Vess (2)", then (3), and so on. Numbering is per
  * campaign so a fork never collides with a name the user chose elsewhere.
  */
-function nextForkName(db: Database, campaignId: number, parentName: string): string {
+function nextForkName(
+  db: Database,
+  campaignId: number,
+  parentName: string,
+): string {
   const base = parentName.replace(/\s*\(\d+\)$/, "");
   const rows = db
     .query("SELECT name FROM dungeons WHERE campaign_id = ?")
@@ -265,13 +298,29 @@ export function upsertRoomNote(
        SET name = excluded.name,
            description = excluded.description,
            updated_at = excluded.updated_at`,
-    [dungeonId, roomIndex, description.name ?? "", JSON.stringify(description), Date.now()],
+    [
+      dungeonId,
+      roomIndex,
+      description.name ?? "",
+      JSON.stringify(description),
+      Date.now(),
+    ],
   );
-  db.run("UPDATE dungeons SET updated_at = ? WHERE id = ?", [Date.now(), dungeonId]);
+  db.run("UPDATE dungeons SET updated_at = ? WHERE id = ?", [
+    Date.now(),
+    dungeonId,
+  ]);
 }
 
-export function deleteRoomNote(db: Database, dungeonId: number, roomIndex: number): void {
-  db.run("DELETE FROM room_notes WHERE dungeon_id = ? AND room_index = ?", [dungeonId, roomIndex]);
+export function deleteRoomNote(
+  db: Database,
+  dungeonId: number,
+  roomIndex: number,
+): void {
+  db.run("DELETE FROM room_notes WHERE dungeon_id = ? AND room_index = ?", [
+    dungeonId,
+    roomIndex,
+  ]);
 }
 
 /** Used when geometry is replaced in place and the old descriptions no longer fit. */
@@ -279,9 +328,12 @@ export function clearRoomNotes(db: Database, dungeonId: number): void {
   db.run("DELETE FROM room_notes WHERE dungeon_id = ?", [dungeonId]);
 }
 
-export function dungeonCampaignId(db: Database, dungeonId: number): number | null {
-  const row = db.query("SELECT campaign_id FROM dungeons WHERE id = ?").get(dungeonId) as
-    | { campaign_id: number }
-    | null;
+export function dungeonCampaignId(
+  db: Database,
+  dungeonId: number,
+): number | null {
+  const row = db
+    .query("SELECT campaign_id FROM dungeons WHERE id = ?")
+    .get(dungeonId) as { campaign_id: number } | null;
   return row?.campaign_id ?? null;
 }

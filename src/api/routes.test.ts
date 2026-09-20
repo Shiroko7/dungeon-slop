@@ -1,3 +1,4 @@
+import { geometry } from "../test-fixtures.ts";
 import { describe, test, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +33,10 @@ async function call(
     init.body = JSON.stringify(body);
     init.headers = { "Content-Type": "application/json" };
   }
-  const res = await handleApiRoute(new Request(`http://localhost${path}`, init), path);
+  const res = await handleApiRoute(
+    new Request(`http://localhost${path}`, init),
+    path,
+  );
   if (res === null) return { status: 404, body: null };
   const text = await res.text();
   return { status: res.status, body: text === "" ? null : JSON.parse(text) };
@@ -42,7 +46,12 @@ async function call(
 
 describe("route matching", () => {
   test("an unknown path falls through so the caller can serve the app", async () => {
-    expect(await handleApiRoute(new Request("http://localhost/whatever"), "/whatever")).toBeNull();
+    expect(
+      await handleApiRoute(
+        new Request("http://localhost/whatever"),
+        "/whatever",
+      ),
+    ).toBeNull();
     const missing = await handleApiRoute(
       new Request("http://localhost/api/nope"),
       "/api/nope",
@@ -58,7 +67,10 @@ describe("route matching", () => {
 
   test("a non-numeric id does not match a numeric route", async () => {
     expect(
-      await handleApiRoute(new Request("http://localhost/api/campaigns/abc"), "/api/campaigns/abc"),
+      await handleApiRoute(
+        new Request("http://localhost/api/campaigns/abc"),
+        "/api/campaigns/abc",
+      ),
     ).toBeNull();
   });
 
@@ -78,16 +90,24 @@ describe("campaign lifecycle over the API", () => {
     expect(created.status).toBe(201);
     const id = created.body.campaign.id as number;
 
-    expect((await call("GET", `/api/campaigns/${id}`)).body.campaign.name).toBe("Ashen Vale");
-    expect((await call("GET", "/api/campaigns")).body.campaigns.length).toBeGreaterThan(0);
+    expect((await call("GET", `/api/campaigns/${id}`)).body.campaign.name).toBe(
+      "Ashen Vale",
+    );
+    expect(
+      (await call("GET", "/api/campaigns")).body.campaigns.length,
+    ).toBeGreaterThan(0);
 
-    const renamed = await call("PATCH", `/api/campaigns/${id}`, { name: "The Ashen Vale" });
+    const renamed = await call("PATCH", `/api/campaigns/${id}`, {
+      name: "The Ashen Vale",
+    });
     expect(renamed.body.campaign.name).toBe("The Ashen Vale");
     expect(renamed.body.campaign.blurb).toBe("ash and salt");
   });
 
   test("a nameless campaign is a bad request, not a 500", async () => {
-    expect((await call("POST", "/api/campaigns", { name: "   " })).status).toBe(400);
+    expect((await call("POST", "/api/campaigns", { name: "   " })).status).toBe(
+      400,
+    );
     expect((await call("POST", "/api/campaigns", {})).status).toBe(400);
   });
 
@@ -96,47 +116,74 @@ describe("campaign lifecycle over the API", () => {
   });
 
   test("dungeons and chats are reached through their campaign", async () => {
-    const campaign = (await call("POST", "/api/campaigns", { name: "Kestrel Reach" })).body
-      .campaign;
+    const campaign = (
+      await call("POST", "/api/campaigns", { name: "Kestrel Reach" })
+    ).body.campaign;
 
-    const dungeon = await call("POST", `/api/campaigns/${campaign.id}/dungeons`, {
-      name: "Crypt of Vess",
-      geometry: { rooms: [{ id: 1 }, { id: 2 }, { id: 3 }], corridors: [] },
-    });
+    const dungeon = await call(
+      "POST",
+      `/api/campaigns/${campaign.id}/dungeons`,
+      {
+        name: "Crypt of Vess",
+        geometry: geometry([1, 2, 3]),
+      },
+    );
     expect(dungeon.status).toBe(201);
     expect(dungeon.body.dungeon.roomCount).toBe(3);
 
-    const chat = await call("POST", `/api/campaigns/${campaign.id}/chats`, { title: "lore" });
+    const chat = await call("POST", `/api/campaigns/${campaign.id}/chats`, {
+      title: "lore",
+    });
     expect(chat.status).toBe(201);
 
-    expect((await call("GET", `/api/campaigns/${campaign.id}/dungeons`)).body.dungeons).toHaveLength(1);
-    expect((await call("GET", `/api/campaigns/${campaign.id}/chats`)).body.chats).toHaveLength(1);
-    expect((await call("GET", `/api/campaigns/${campaign.id}/notes`)).body.count).toBe(0);
+    expect(
+      (await call("GET", `/api/campaigns/${campaign.id}/dungeons`)).body
+        .dungeons,
+    ).toHaveLength(1);
+    expect(
+      (await call("GET", `/api/campaigns/${campaign.id}/chats`)).body.chats,
+    ).toHaveLength(1);
+    expect(
+      (await call("GET", `/api/campaigns/${campaign.id}/notes`)).body.count,
+    ).toBe(0);
   });
 
   test("a dungeon under a missing campaign is a 404, not an orphan", async () => {
-    expect((await call("POST", "/api/campaigns/99999/dungeons", { name: "Ghost" })).status).toBe(404);
+    expect(
+      (await call("POST", "/api/campaigns/99999/dungeons", { name: "Ghost" }))
+        .status,
+    ).toBe(404);
     expect((await call("GET", "/api/campaigns/99999/chats")).status).toBe(404);
     expect((await call("GET", "/api/campaigns/99999/notes")).status).toBe(404);
   });
 
   test("deleting a campaign takes its dungeons and chats with it", async () => {
-    const campaign = (await call("POST", "/api/campaigns", { name: "Doomed" })).body.campaign;
-    const dungeon = (await call("POST", `/api/campaigns/${campaign.id}/dungeons`, { name: "Crypt" }))
-      .body.dungeon;
-    const chat = (await call("POST", `/api/campaigns/${campaign.id}/chats`, {})).body.chat;
+    const campaign = (await call("POST", "/api/campaigns", { name: "Doomed" }))
+      .body.campaign;
+    const dungeon = (
+      await call("POST", `/api/campaigns/${campaign.id}/dungeons`, {
+        name: "Crypt",
+      })
+    ).body.dungeon;
+    const chat = (await call("POST", `/api/campaigns/${campaign.id}/chats`, {}))
+      .body.chat;
 
-    expect((await call("DELETE", `/api/campaigns/${campaign.id}`)).body.deleted).toBe(campaign.id);
+    expect(
+      (await call("DELETE", `/api/campaigns/${campaign.id}`)).body.deleted,
+    ).toBe(campaign.id);
 
     expect((await call("GET", `/api/dungeons/${dungeon.id}`)).status).toBe(404);
     expect((await call("GET", `/api/chats/${chat.id}`)).status).toBe(404);
-    expect((await call("DELETE", `/api/campaigns/${campaign.id}`)).status).toBe(404);
+    expect((await call("DELETE", `/api/campaigns/${campaign.id}`)).status).toBe(
+      404,
+    );
   });
 });
 
 describe("dungeon routes", () => {
   async function newCampaign(name: string): Promise<number> {
-    return (await call("POST", "/api/campaigns", { name })).body.campaign.id as number;
+    return (await call("POST", "/api/campaigns", { name })).body.campaign
+      .id as number;
   }
 
   test("a patch saves only what it sends", async () => {
@@ -145,12 +192,14 @@ describe("dungeon routes", () => {
       await call("POST", `/api/campaigns/${campaignId}/dungeons`, {
         name: "Crypt",
         seed: 42,
-        geometry: { rooms: [{ id: 1 }], corridors: [] },
+        geometry: geometry([1]),
       })
     ).body.dungeon;
 
     const patched = await call("PATCH", `/api/dungeons/${dungeon.id}`, {
-      geometry: { rooms: [{ id: 1 }, { id: 2 }], corridors: [] },
+      expectedRevision: 0,
+      operationId: crypto.randomUUID(),
+      patch: { geometry: geometry([1, 2]) },
     });
 
     expect(patched.body.dungeon.roomCount).toBe(2);
@@ -163,17 +212,20 @@ describe("dungeon routes", () => {
     const original = (
       await call("POST", `/api/campaigns/${campaignId}/dungeons`, {
         name: "Crypt of Vess",
-        geometry: { rooms: [{ id: 1 }, { id: 2 }], corridors: [] },
+        geometry: geometry([1, 2]),
       })
     ).body.dungeon;
 
     await call("PUT", `/api/dungeons/${original.id}/rooms/1`, {
+      expectedRevision: 0,
+      operationId: crypto.randomUUID(),
       description: { name: "Entry Hall", features: "Cold." },
     });
 
     const fork = await call("POST", `/api/dungeons/${original.id}/fork`, {
+      expectedRevision: 1,
       seed: 7,
-      geometry: { rooms: [{ id: 1 }], corridors: [] },
+      geometry: geometry([1]),
     });
 
     expect(fork.status).toBe(201);
@@ -183,7 +235,9 @@ describe("dungeon routes", () => {
 
     const kept = await call("GET", `/api/dungeons/${original.id}`);
     expect(kept.body.dungeon.roomCount).toBe(2);
-    expect(kept.body.dungeon.roomNotes).toEqual([[1, { name: "Entry Hall", features: "Cold." }]]);
+    expect(kept.body.dungeon.roomNotes).toEqual([
+      [1, { name: "Entry Hall", features: "Cold." }],
+    ]);
   });
 
   test("room notes round-trip and can be removed", async () => {
@@ -191,47 +245,73 @@ describe("dungeon routes", () => {
     const dungeon = (
       await call("POST", `/api/campaigns/${campaignId}/dungeons`, {
         name: "Crypt",
-        geometry: { rooms: [{ id: 1 }, { id: 2 }], corridors: [] },
+        geometry: geometry([1, 2]),
       })
     ).body.dungeon;
 
     await call("PUT", `/api/dungeons/${dungeon.id}/rooms/2`, {
+      expectedRevision: 0,
+      operationId: crypto.randomUUID(),
       description: { name: "Cistern", features: "Black water." },
     });
-    expect((await call("GET", `/api/dungeons/${dungeon.id}`)).body.dungeon.describedCount).toBe(1);
+    expect(
+      (await call("GET", `/api/dungeons/${dungeon.id}`)).body.dungeon
+        .describedCount,
+    ).toBe(1);
 
-    await call("DELETE", `/api/dungeons/${dungeon.id}/rooms/2`);
-    expect((await call("GET", `/api/dungeons/${dungeon.id}`)).body.dungeon.roomNotes).toEqual([]);
+    await call("DELETE", `/api/dungeons/${dungeon.id}/rooms/2`, {
+      expectedRevision: 1,
+      operationId: crypto.randomUUID(),
+    });
+    expect(
+      (await call("GET", `/api/dungeons/${dungeon.id}`)).body.dungeon.roomNotes,
+    ).toEqual([]);
   });
 
   test("a room note without a description is a bad request", async () => {
     const campaignId = await newCampaign("Bad Note");
-    const dungeon = (await call("POST", `/api/campaigns/${campaignId}/dungeons`, { name: "Crypt" }))
-      .body.dungeon;
+    const dungeon = (
+      await call("POST", `/api/campaigns/${campaignId}/dungeons`, {
+        name: "Crypt",
+      })
+    ).body.dungeon;
 
-    expect((await call("PUT", `/api/dungeons/${dungeon.id}/rooms/1`, {})).status).toBe(400);
-    expect((await call("PUT", "/api/dungeons/99999/rooms/1", { description: {} })).status).toBe(404);
+    expect(
+      (await call("PUT", `/api/dungeons/${dungeon.id}/rooms/1`, {})).status,
+    ).toBe(400);
+    expect(
+      (await call("PUT", "/api/dungeons/99999/rooms/1", { description: {} }))
+        .status,
+    ).toBe(404);
   });
 
   test("the Architect thread is created on first ask and reused after", async () => {
     const campaignId = await newCampaign("Architect");
-    const dungeon = (await call("POST", `/api/campaigns/${campaignId}/dungeons`, { name: "Crypt" }))
-      .body.dungeon;
+    const dungeon = (
+      await call("POST", `/api/campaigns/${campaignId}/dungeons`, {
+        name: "Crypt",
+      })
+    ).body.dungeon;
 
-    const first = await call("GET", `/api/dungeons/${dungeon.id}/chat`);
-    const second = await call("GET", `/api/dungeons/${dungeon.id}/chat`);
+    const first = await call("POST", `/api/dungeons/${dungeon.id}/chat`, {});
+    const second = await call("POST", `/api/dungeons/${dungeon.id}/chat`, {});
 
     expect(first.body.chat.id).toBe(second.body.chat.id);
     expect(first.body.chat.dungeonId).toBe(dungeon.id);
     // It is a build log, not a Loremaster thread, so it stays out of that list.
-    expect((await call("GET", `/api/campaigns/${campaignId}/chats`)).body.chats).toEqual([]);
+    expect(
+      (await call("GET", `/api/campaigns/${campaignId}/chats`)).body.chats,
+    ).toEqual([]);
   });
 });
 
 describe("chat routes", () => {
   test("messages append, title themselves, and truncate", async () => {
-    const campaignId = (await call("POST", "/api/campaigns", { name: "Chatty" })).body.campaign.id;
-    const chat = (await call("POST", `/api/campaigns/${campaignId}/chats`, {})).body.chat;
+    const campaignId = (
+      await call("POST", "/api/campaigns", { name: "Chatty" })
+    ).body.campaign.id;
+    const chat = (await call("POST", `/api/campaigns/${campaignId}/chats`, {}))
+      .body.chat;
 
     await call("POST", `/api/chats/${chat.id}/messages`, {
       role: "user",
@@ -261,10 +341,16 @@ describe("chat routes", () => {
   });
 
   test("a whole transcript can be replaced in one call", async () => {
-    const campaignId = (await call("POST", "/api/campaigns", { name: "Replace" })).body.campaign.id;
-    const chat = (await call("POST", `/api/campaigns/${campaignId}/chats`, {})).body.chat;
+    const campaignId = (
+      await call("POST", "/api/campaigns", { name: "Replace" })
+    ).body.campaign.id;
+    const chat = (await call("POST", `/api/campaigns/${campaignId}/chats`, {}))
+      .body.chat;
 
-    await call("POST", `/api/chats/${chat.id}/messages`, { role: "user", content: "first" });
+    await call("POST", `/api/chats/${chat.id}/messages`, {
+      role: "user",
+      content: "first",
+    });
     const replaced = await call("POST", `/api/chats/${chat.id}/messages`, {
       messages: [
         { role: "user", content: "rebuilt" },
@@ -272,18 +358,34 @@ describe("chat routes", () => {
       ],
     });
 
-    expect(replaced.body.messages.map((m: { content: string }) => m.content)).toEqual([
-      "rebuilt",
-      "acknowledged",
-    ]);
+    expect(
+      replaced.body.messages.map((m: { content: string }) => m.content),
+    ).toEqual(["rebuilt", "acknowledged"]);
   });
 
   test("a message with no usable role is rejected", async () => {
-    const campaignId = (await call("POST", "/api/campaigns", { name: "Bad Role" })).body.campaign.id;
-    const chat = (await call("POST", `/api/campaigns/${campaignId}/chats`, {})).body.chat;
+    const campaignId = (
+      await call("POST", "/api/campaigns", { name: "Bad Role" })
+    ).body.campaign.id;
+    const chat = (await call("POST", `/api/campaigns/${campaignId}/chats`, {}))
+      .body.chat;
 
-    expect((await call("POST", `/api/chats/${chat.id}/messages`, { role: "system", content: "x" })).status).toBe(400);
-    expect((await call("POST", "/api/chats/99999/messages", { role: "user", content: "x" })).status).toBe(404);
+    expect(
+      (
+        await call("POST", `/api/chats/${chat.id}/messages`, {
+          role: "system",
+          content: "x",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("POST", "/api/chats/99999/messages", {
+          role: "user",
+          content: "x",
+        })
+      ).status,
+    ).toBe(404);
   });
 });
 
@@ -308,7 +410,11 @@ describe("legacy import", () => {
         },
         // Same geometry as `current` — history recorded it at generation time,
         // so importing both would duplicate the live map.
-        { config: null, dungeon: { rooms: [{ id: 1 }, { id: 2 }], corridors: [] }, label: "dupe" },
+        {
+          config: null,
+          dungeon: { rooms: [{ id: 1 }, { id: 2 }], corridors: [] },
+          label: "dupe",
+        },
       ],
     });
 
@@ -318,7 +424,137 @@ describe("legacy import", () => {
     const after = await call("GET", "/api/legacy-import");
     expect(after.body.done).toBe(true);
 
-    const second = await call("POST", "/api/legacy-import", { current: null, history: [] });
+    const second = await call("POST", "/api/legacy-import", {
+      current: null,
+      history: [],
+    });
     expect(second.body.skipped).toBe(true);
+  });
+});
+
+describe("M1 ownership and validation boundaries", () => {
+  test("mutations require a revision and reject malformed payloads", async () => {
+    const campaign = (
+      await call("POST", "/api/campaigns", { name: "Validation" })
+    ).body.campaign;
+    const dungeon = (
+      await call("POST", `/api/campaigns/${campaign.id}/dungeons`, {
+        name: "Map",
+        geometry: geometry([0]),
+      })
+    ).body.dungeon;
+    for (const body of [
+      null,
+      [],
+      "bad",
+      { name: "blind overwrite" },
+      {
+        expectedRevision: 0,
+        operationId: crypto.randomUUID(),
+        patch: { name: [] },
+      },
+    ]) {
+      expect(
+        (await call("PATCH", `/api/dungeons/${dungeon.id}`, body)).status,
+      ).toBe(400);
+    }
+    const save = {
+      expectedRevision: 0,
+      operationId: crypto.randomUUID(),
+      patch: { name: "writer one" },
+    };
+    expect(
+      (await call("PATCH", `/api/dungeons/${dungeon.id}`, save)).status,
+    ).toBe(200);
+    expect(
+      (await call("PATCH", `/api/dungeons/${dungeon.id}`, save)).body.revision,
+    ).toBe(1);
+    const conflict = await call("PATCH", `/api/dungeons/${dungeon.id}`, {
+      ...save,
+      operationId: crypto.randomUUID(),
+      patch: { name: "writer two" },
+    });
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.code).toBe("revision_conflict");
+    const wrongRoom = await call("PATCH", `/api/dungeons/${dungeon.id}`, {
+      expectedRevision: 1,
+      operationId: crypto.randomUUID(),
+      patch: { roomNotes: [[999, { name: "orphan" }]] },
+    });
+    expect(wrongRoom.status).toBe(400);
+  });
+  test("misowned AI requests fail before touching a provider", async () => {
+    const a = (await call("POST", "/api/campaigns", { name: "Owner A" })).body
+      .campaign;
+    const b = (await call("POST", "/api/campaigns", { name: "Owner B" })).body
+      .campaign;
+    const dungeon = (
+      await call("POST", `/api/campaigns/${a.id}/dungeons`, { name: "A" })
+    ).body.dungeon;
+    const chat = (await call("POST", `/api/campaigns/${b.id}/chats`, {})).body
+      .chat;
+    expect(
+      (
+        await call("POST", "/api/generate-config", {
+          prompt: "x",
+          campaignId: b.id,
+          dungeonId: dungeon.id,
+          expectedRevision: 0,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("POST", "/api/generate-config", {
+          prompt: "x",
+          campaignId: a.id,
+          dungeonId: dungeon.id,
+          chatId: chat.id,
+          expectedRevision: 0,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("POST", "/api/generate-config", {
+          prompt: "x",
+          campaignId: a.id,
+          dungeonId: dungeon.id,
+          expectedRevision: 4,
+        })
+      ).status,
+    ).toBe(409);
+    expect((await call("POST", "/api/generate-config", null)).status).toBe(400);
+  });
+  test("browser origins and rebinding hosts are rejected, known local origins work", async () => {
+    for (const origin of [
+      "https://evil.example",
+      "null",
+      "http://localhost:9999",
+    ]) {
+      const request = new Request("http://localhost:3000/api/campaigns", {
+        method: "POST",
+        headers: { Origin: origin, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Must not be written" }),
+      });
+      expect((await handleApiRoute(request, "/api/campaigns"))!.status).toBe(
+        403,
+      );
+    }
+    const valid = new Request("http://127.0.0.1:3000/api/campaigns", {
+      method: "POST",
+      headers: {
+        Origin: "http://localhost:5173",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: "Local frontend" }),
+    });
+    expect((await handleApiRoute(valid, "/api/campaigns"))!.status).toBe(201);
+    expect(
+      (await handleApiRoute(
+        new Request("http://evil.example:3000/api/campaigns"),
+        "/api/campaigns",
+      ))!.status,
+    ).toBe(403);
   });
 });

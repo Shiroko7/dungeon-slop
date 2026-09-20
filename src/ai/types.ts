@@ -30,6 +30,7 @@ export interface AIModelInfo {
 }
 
 export interface AICompletionOptions {
+  signal?: AbortSignal;
   messages: AIMessage[];
   /** Defaults to the provider's defaultModel when omitted. */
   model?: string;
@@ -55,6 +56,12 @@ export interface AIProvider {
   /** Whether this provider accepts AIMessage.images. */
   supportsImages?: boolean;
   defaultModel: string;
-  complete(apiKey: string, options: AICompletionOptions): Promise<AICompletionResult>;
-  streamComplete(apiKey: string, options: AICompletionOptions): AsyncGenerator<string, AICompletionResult>;
+  complete(
+    apiKey: string,
+    options: AICompletionOptions,
+  ): Promise<AICompletionResult>;
+  streamComplete(
+    apiKey: string,
+    options: AICompletionOptions,
+  ): AsyncGenerator<string, AICompletionResult>;
 }

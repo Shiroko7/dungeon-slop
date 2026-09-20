@@ -1,4 +1,10 @@
-import type { AIProvider, AIModelInfo, AICompletionOptions, AICompletionResult, AIMessage } from "../types.ts";
+import type {
+  AIProvider,
+  AIModelInfo,
+  AICompletionOptions,
+  AICompletionResult,
+  AIMessage,
+} from "../types.ts";
 
 const BASE_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-haiku-4-5-20251001";
@@ -27,7 +33,10 @@ interface AnthropicStreamEvent {
   index?: number;
 }
 
-function convertMessages(messages: AIMessage[]): { system: string | undefined; messages: AnthropicMessage[] } {
+function convertMessages(messages: AIMessage[]): {
+  system: string | undefined;
+  messages: AnthropicMessage[];
+} {
   let system: string | undefined;
   const converted: AnthropicMessage[] = [];
 
@@ -55,7 +64,10 @@ export const claudeProvider: AIProvider = {
   models: MODELS,
   defaultModel: MODEL,
 
-  async complete(apiKey: string, options: AICompletionOptions): Promise<AICompletionResult> {
+  async complete(
+    apiKey: string,
+    options: AICompletionOptions,
+  ): Promise<AICompletionResult> {
     const { system, messages } = convertMessages(options.messages);
 
     const body: Record<string, unknown> = {
@@ -64,13 +76,17 @@ export const claudeProvider: AIProvider = {
       messages,
     };
     if (system) body.system = system;
-    if (options.temperature !== undefined) body.temperature = options.temperature;
+    if (options.temperature !== undefined)
+      body.temperature = options.temperature;
 
     const response = await fetch(BASE_URL, {
       method: "POST",
       headers: buildHeaders(apiKey),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.any([
+        AbortSignal.timeout(300_000),
+        ...(options.signal ? [options.signal] : []),
+      ]),
     });
 
     if (!response.ok) {
@@ -94,7 +110,10 @@ export const claudeProvider: AIProvider = {
     };
   },
 
-  async *streamComplete(apiKey: string, options: AICompletionOptions): AsyncGenerator<string, AICompletionResult> {
+  async *streamComplete(
+    apiKey: string,
+    options: AICompletionOptions,
+  ): AsyncGenerator<string, AICompletionResult> {
     const { system, messages } = convertMessages(options.messages);
 
     const body: Record<string, unknown> = {
@@ -104,13 +123,17 @@ export const claudeProvider: AIProvider = {
       stream: true,
     };
     if (system) body.system = system;
-    if (options.temperature !== undefined) body.temperature = options.temperature;
+    if (options.temperature !== undefined)
+      body.temperature = options.temperature;
 
     const response = await fetch(BASE_URL, {
       method: "POST",
       headers: buildHeaders(apiKey),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.any([
+        AbortSignal.timeout(300_000),
+        ...(options.signal ? [options.signal] : []),
+      ]),
     });
 
     if (!response.ok) {
@@ -156,10 +179,16 @@ export const claudeProvider: AIProvider = {
           if (event.type === "message_start" && event.message) {
             modelName = event.message.model;
             inputTokens = event.message.usage.input_tokens;
-          } else if (event.type === "content_block_delta" && event.delta?.text) {
+          } else if (
+            event.type === "content_block_delta" &&
+            event.delta?.text
+          ) {
             fullContent += event.delta.text;
             yield event.delta.text;
-          } else if (event.type === "message_delta" && event.usage?.output_tokens) {
+          } else if (
+            event.type === "message_delta" &&
+            event.usage?.output_tokens
+          ) {
             outputTokens = event.usage.output_tokens;
           }
         }
