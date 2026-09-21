@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { touchCampaign } from "./campaigns.ts";
 import { dungeonCampaignId } from "./dungeons.ts";
-import type { ChatMessage, ChatRecord, ChatSummary, Citation, MessageInput } from "./types.ts";
+import type { ChatMessage, ChatRecord, ChatSummary, Citation, MessageInput, ToolCallRecord } from "./types.ts";
 
 interface ChatRow {
   id: number;
@@ -18,6 +18,7 @@ interface MessageRow {
   role: string;
   content: string;
   citations: string | null;
+  tool_calls: string | null;
   created_at: number;
 }
 
@@ -49,11 +50,21 @@ function toMessage(row: MessageRow): ChatMessage {
       // A malformed citation list should cost the footnotes, not the message.
     }
   }
+  let toolCalls: ToolCallRecord[] | null = null;
+  if (row.tool_calls !== null) {
+    try {
+      const parsed: unknown = JSON.parse(row.tool_calls);
+      if (Array.isArray(parsed)) toolCalls = parsed as ToolCallRecord[];
+    } catch {
+      // Malformed provenance must not hide the answer itself.
+    }
+  }
   return {
     id: row.id,
     role: row.role === "assistant" ? "assistant" : "user",
     content: row.content,
     citations,
+    toolCalls,
     createdAt: row.created_at,
   };
 }
@@ -78,7 +89,7 @@ export function getChat(db: Database, id: number): ChatRecord | null {
 export function listMessages(db: Database, chatId: number): ChatMessage[] {
   const rows = db
     .query(
-      "SELECT id, role, content, citations, created_at FROM messages WHERE chat_id = ? ORDER BY id",
+      "SELECT id, role, content, citations, tool_calls, created_at FROM messages WHERE chat_id = ? ORDER BY id",
     )
     .all(chatId) as MessageRow[];
   return rows.map(toMessage);
@@ -155,12 +166,13 @@ export function deleteChat(db: Database, id: number): boolean {
 export function appendMessage(db: Database, chatId: number, input: MessageInput): ChatMessage {
   const now = Date.now();
   db.run(
-    "INSERT INTO messages (chat_id, role, content, citations, created_at) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO messages (chat_id, role, content, citations, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     [
       chatId,
       input.role,
       input.content,
       input.citations == null ? null : JSON.stringify(input.citations),
+      input.toolCalls == null ? null : JSON.stringify(input.toolCalls),
       now,
     ],
   );
@@ -178,7 +190,7 @@ export function appendMessage(db: Database, chatId: number, input: MessageInput)
   }
 
   const row = db
-    .query("SELECT id, role, content, citations, created_at FROM messages WHERE id = ?")
+    .query("SELECT id, role, content, citations, tool_calls, created_at FROM messages WHERE id = ?")
     .get(id) as MessageRow;
   return toMessage(row);
 }
@@ -188,7 +200,7 @@ export function replaceMessages(db: Database, chatId: number, inputs: MessageInp
   db.transaction(() => {
     db.run("DELETE FROM messages WHERE chat_id = ?", [chatId]);
     const insert = db.prepare(
-      "INSERT INTO messages (chat_id, role, content, citations, created_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO messages (chat_id, role, content, citations, tool_calls, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     );
     const now = Date.now();
     for (const [i, input] of inputs.entries()) {
@@ -197,6 +209,7 @@ export function replaceMessages(db: Database, chatId: number, inputs: MessageInp
         input.role,
         input.content,
         input.citations == null ? null : JSON.stringify(input.citations),
+        input.toolCalls == null ? null : JSON.stringify(input.toolCalls),
         // Spaced so the ordering survives a later sort by timestamp as well as by id.
         now + i,
       );

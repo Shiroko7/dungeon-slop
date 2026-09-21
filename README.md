@@ -6,13 +6,15 @@ plans rooms and connections and a narrator that writes room descriptions.
 Runs locally on Bun + SQLite. The name undersells it; the test suite does not.
 
 ```
-1390 pass · 0 fail · 29 files
+1407 pass · 0 fail · 34 files
 ```
 
-M2.1 automated verification: 2026-09-21. Rust has 28 baseline passing tests (not
-rerun for this notes-only change). Coverage includes save recovery, authored
-revisions, edit reconciliation, recoverable ingestion, source reading and retrieval. Live browser
-verification remains pending; export corrections remain on the roadmap.
+M2.2 automated verification: 2026-09-21. Rust has 28 baseline passing tests (not
+rerun; this milestone changes no Rust code). Coverage includes save recovery, authored
+revisions, edit reconciliation, recoverable ingestion, source reading, retrieval,
+bounded Loremaster research, streaming cancellation, citations, and persisted
+tool provenance. Live browser verification remains pending; export corrections
+remain on the roadmap. See [the M2.2 review guide](docs/M2.2-REVIEW.md).
 
 See [ROADMAP.md](ROADMAP.md) for the four milestones and detailed PR scopes, and
 [TASKS.md](TASKS.md) for execution status. Milestone 1 is grouped into four PRs:
@@ -32,9 +34,10 @@ adjacency — the procedural engine lays that out as real geometry, and the narr
 writes rooms consistent with the map and those sources.
 
 **Today:** prompt/chat-driven planning, procedural layout, narration, editing,
-note ingestion, source reading and campaign search exist. Retrieval is not connected to the Architect or Narrator,
-and the Loremaster saves questions but does not answer. Completing that connection
-is milestone 2, after protecting existing work in milestone 1.
+note ingestion, source reading, campaign search, and bounded, citation-backed
+Loremaster answers exist. Retrieval is not yet connected to the Architect or
+Narrator; that is the remaining M2.3 package after protecting existing work and
+making the Loremaster workflow inspectable.
 
 ## Everything lives in one tree
 
@@ -152,9 +155,10 @@ The reader displays source text rather than executing embedded HTML.
 `bun run eval:retrieval` runs a fixed 36-query, two-campaign synthetic benchmark:
 keyword hit@5 **84.8%**, semantic and hybrid **100%**, with **zero cross-campaign
 results**. These are deterministic integration results, not cloud-model quality
-claims. See [M2.1 review, API and limits](docs/M2.1-REVIEW.md) and the
-[checked-in evaluation report](docs/M2.1-EVAL.json). Search retrieves evidence;
-it does not generate answers or determine whether a claim is supported.
+claims. See [M2.1 review, API and limits](docs/M2.1-REVIEW.md), [the M2.2
+review guide](docs/M2.2-REVIEW.md), and the [checked-in evaluation report](docs/M2.1-EVAL.json).
+Search feeds the bounded Loremaster; the agent cites returned evidence and says
+when the notes are insufficient rather than silently filling gaps.
 
 The point is that a 200-page campaign wiki does not fit in a context window, and
 stuffing in the first 8k tokens of it gets you a dungeon themed around your
@@ -189,7 +193,7 @@ calls, so call count varies with the chosen workflow and number of rooms. Ollama
 supports local generation; configure notes providers separately.
 
 ```bash
-bun test                # 1390 tests
+bun test                # see the verification count above
 bun run eval:retrieval  # synthetic notes only; no paid calls
 bun run build
 ```
@@ -215,8 +219,10 @@ schema is SQL and the migrations are explicit.
 
 - **Single level per dungeon.** Stairs render as features but do not connect to
   a second floor. Multi-level is a data model change, not a rendering one.
-- Loremaster answers and retrieval-grounded generation are not implemented. Current AI output
-  relies on the prompt/chat and can invent details; it has no verified note citations.
+- Loremaster answers are bounded to campaign-owned, read-only note tools and
+  persist revision-bound citations. Architect/Narrator retrieval grounding is
+  still planned for M2.3, and model quality is not a substitute for reviewing
+  source snippets.
 - Recovery is bounded, not a backup system. Review the M1 operating notes and keep
   backups of your SQLite database. Live-browser acceptance checks are still pending.
 - Local single-user app. No auth, no multi-user, no hosted mode. The API binds to

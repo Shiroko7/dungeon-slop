@@ -45,6 +45,7 @@ import {
   handleLegacyImportStatus,
 } from "./legacy-import.ts";
 import { handleUsage } from "./usage.ts";
+import { handleAskLoremaster } from "./loremaster.ts";
 import { handleReadNote, handleSearchNotes } from "./search-notes.ts";
 import { json, readJson, badRequest, serverError } from "./http.ts";
 import { checkOrigin } from "./origin.ts";
@@ -191,6 +192,11 @@ const routes: Route[] = [
   },
 
   // ─── chats, owned by a campaign ───────────────────────────────────────────
+  {
+    method: "POST",
+    pattern: /^\/api\/campaigns\/(\d+)\/chats\/(\d+)\/ask$/,
+    handle: (req, [campaign, chat]) => handleAskLoremaster(req, campaign!, chat!),
+  },
   {
     method: "GET",
     pattern: /^\/api\/campaigns\/(\d+)\/chats$/,

@@ -3,8 +3,9 @@
 Updated 2026-09-21. [ROADMAP.md](ROADMAP.md) is the authoritative plan, including
 scope, dependencies, and acceptance criteria. This file tracks execution. The
 September review and roadmap are complete. M1.1–M1.4 are merged. M2.1 is implemented
-on its review branch with automated checks passing; live browser verification is
-pending. See the [M2.1 review guide](docs/M2.1-REVIEW.md) for limits and remaining checks.
+merged with automated checks passing; M2.2 is implemented on its review branch;
+live browser verification is pending. See the
+[M2.2 review guide](docs/M2.2-REVIEW.md) for limits and remaining checks.
 
 ## Milestone 1 in four PRs
 
@@ -52,22 +53,26 @@ changes together and update the roadmap if evidence changes scope.
 | M3 — Make it comfortable at the table | M3.1 exports; M3.2 creation/workspace/accessibility; M3.3 library/recovery; M3.4 providers/usage | PLANNED |
 | M4 — Expand after measuring | Themes; encounter/session preparation; connected levels; measured Rust/WASM acceleration | CANDIDATES |
 
+M2.1 is merged. M2.2 is the current draft review unit; M2.3 remains planned.
+
 Known export disclosure/format defects are tracked under M3.1 and remain unresolved.
 Treat current exports as GM material and inspect before sharing. A focused urgent
 correction can move earlier without pulling in the entire export redesign.
 
-### Current review unit: M2.1
+### Current review unit: M2.2
 
 Reader deep links bind campaign/document/revision/chunk identity. Campaign-scoped
 keyword, semantic and hybrid search share source filtering, rank fusion, overlap
 deduplication, neighbor expansion, context budgets, provider validation and cancellation.
-The library exposes these diagnostics without an answering agent.
+M2.2 adds the bounded Loremaster loop over those diagnostics, with streaming,
+revision-bound citations, cancellation, and persisted tool provenance.
 
-Automated acceptance: 1,390 tests; type check and build pass. The fixed 36-query
-synthetic evaluation reports 84.8% keyword and 100% semantic/hybrid hit@5 with zero
-cross-campaign hits. No paid provider calls or live-database mutations. Interactive
-browser checks remain unverified, so this package is not marked complete. M2.2 is
-the next package after review/merge, not part of this PR.
+Automated acceptance covers the bounded Loremaster loop, campaign-owned read-only
+tools, SSE streaming, cancellation, persisted citations/tool provenance, and the
+chat UI. The fixed 36-query synthetic evaluation still reports 84.8% keyword and
+100% semantic/hybrid hit@5 with zero cross-campaign hits. No paid provider calls or
+live-database mutations. Interactive browser checks remain unverified, so this
+package is not marked complete. See [the M2.2 review guide](docs/M2.2-REVIEW.md).
 
 ## The model
 
@@ -150,8 +155,8 @@ PR-level acceptance requirements are in [the roadmap](ROADMAP.md#verification-an
 | Shared static renderer | Live map and exports share `renderStaticLayers` | Keep it shared |
 | Visual motifs | Default, Infernal, Aquatic have palettes; five fall back | M4.1 |
 | PNG/PDF/VTT and description exports | Implemented; correctness/audience/size gaps | M3.1 |
-| Hybrid retrieval (former 7E) | Campaign search, revision-bound reader, diagnostic API and synthetic evaluation implemented | M2.1 draft review |
-| Loremaster answers (former 7F) | Questions persist; answering not implemented | M2.2 |
+| Hybrid retrieval (former 7E) | Campaign search, revision-bound reader, diagnostic API and synthetic evaluation implemented | M2.1 merged; interactive review pending |
+| Loremaster answers (former 7F) | Bounded campaign tools, streamed answers, revision-bound citations, cancellation, and persisted provenance | M2.2 draft review |
 | Architect reads notes (former 7G) | Not implemented | M2.3 |
 | Usage ledger | Generation tokens tracked; cloud rates unset; notes calls missing | M3.4 |
 | Rust/WASM | PRNG/types/grid ported; production generator remains TypeScript | M4.4 after profiling |

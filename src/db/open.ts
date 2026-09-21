@@ -11,7 +11,7 @@ export const DEFAULT_DB_PATH = process.env.NOTES_DB_PATH ?? "notes.sqlite";
  * declarative schema can only create, and `CREATE TABLE IF NOT EXISTS` would
  * happily leave a v1 `documents` in place while reporting success.
  */
-export function openAppDb(path: string = DEFAULT_DB_PATH): Database {
+export function openAppDb(path: string = process.env.NOTES_DB_PATH ?? DEFAULT_DB_PATH): Database {
   const db = new Database(path, { create: true });
   // Not persisted in the file — has to be re-asserted on every connection.
   db.run("PRAGMA foreign_keys = ON");

@@ -506,6 +506,18 @@ describe("chats", () => {
     expect(messages[0]?.citations).toBeNull();
   });
 
+  test("assistant messages keep bounded tool provenance across reload", () => {
+    const db = fresh();
+    const campaign = createCampaign(db, { name: "Ashen Vale" });
+    const chat = createChat(db, campaign.id);
+    const assistant = appendMessage(db, chat.id, {
+      role: "assistant", content: "Grounded answer", citations: null,
+      toolCalls: [{ name: "search_notes", args: { query: "gate" }, status: "completed", result: "[S1] crypt.md" }],
+    });
+    expect(assistant.toolCalls?.[0]).toMatchObject({ name: "search_notes", status: "completed" });
+    expect(getChat(db, chat.id)?.messages[0]?.toolCalls?.[0]?.result).toContain("crypt.md");
+  });
+
   test("a malformed citation list costs the footnotes, not the message", () => {
     const db = fresh();
     const c = createCampaign(db, { name: "Ashen Vale" });

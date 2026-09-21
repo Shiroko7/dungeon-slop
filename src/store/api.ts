@@ -163,6 +163,35 @@ export const api = {
   },
 
   chats: {
+    ask: async function* (campaignId: number, chatId: number, body: { question: string; provider?: string; model?: string | null; temperature?: number; thinkingLevel?: string | null }, signal: AbortSignal): AsyncGenerator<Record<string, unknown>> {
+      const payload = { ...body };
+      if (payload.model === null) delete payload.model;
+      if (payload.thinkingLevel === null) delete payload.thinkingLevel;
+      const response = await fetch(`/api/campaigns/${campaignId}/chats/${chatId}/ask`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(payload?.error ?? `Server responded with ${response.status}`);
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder(); let buffer = "";
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += done ? decoder.decode() + "\n" : decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const parsed = JSON.parse(line.slice(5).trim()) as Record<string, unknown>;
+            if (typeof parsed.error === "string") throw new Error(parsed.error);
+            yield parsed;
+          }
+          if (done) break;
+        }
+      } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    },
     list: (campaignId: number) =>
       request<{ chats: ChatSummary[] }>(
         `/api/campaigns/${campaignId}/chats`,

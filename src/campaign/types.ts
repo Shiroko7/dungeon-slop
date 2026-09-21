@@ -107,6 +107,17 @@ export interface Citation {
   filename: string;
   headingPath: string;
   snippet: string;
+  campaignId?: number;
+  revision?: number;
+  startOffset?: number;
+  endOffset?: number;
+}
+
+export interface ToolCallRecord {
+  name: "list_documents" | "search_notes" | "read_document";
+  args: Record<string, unknown>;
+  status: "completed" | "failed";
+  result?: string;
 }
 
 export interface ChatMessage {
@@ -114,6 +125,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   citations: Citation[] | null;
+  toolCalls?: ToolCallRecord[] | null;
   createdAt: number;
 }
 
@@ -125,4 +137,5 @@ export interface MessageInput {
   role: "user" | "assistant";
   content: string;
   citations?: Citation[] | null;
+  toolCalls?: ToolCallRecord[] | null;
 }
