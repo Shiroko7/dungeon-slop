@@ -9,6 +9,10 @@
  */
 
 export const SUPPORTED_EXTENSIONS = [".md", ".txt", ".markdown", ".text"] as const;
+export const MAX_NOTE_FILES = 20;
+export const MAX_NOTE_FILE_BYTES = 5 * 1024 * 1024;
+export const MAX_NOTE_BATCH_BYTES = 20 * 1024 * 1024;
+export const CHUNKER_VERSION = "markdown-v1";
 
 export function isSupportedFile(filename: string): boolean {
   const lower = filename.toLowerCase();

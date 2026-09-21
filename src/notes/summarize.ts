@@ -31,14 +31,14 @@ export function createAnthropicSummarizer(
     name: "anthropic",
     model,
 
-    async summarize(filename: string, text: string): Promise<DocumentSummary> {
+    async summarize(filename: string, text: string, signal?: AbortSignal): Promise<DocumentSummary> {
       const message = await client.messages.parse({
         model,
         max_tokens: SUMMARY_MAX_TOKENS,
         system: SUMMARY_SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildSummaryPrompt(filename, text) }],
         output_config: { format: zodOutputFormat(SummarySchema) },
-      });
+      }, { signal });
 
       const parsed = message.parsed_output;
       if (!parsed) {

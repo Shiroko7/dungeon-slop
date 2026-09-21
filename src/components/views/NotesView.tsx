@@ -33,6 +33,11 @@ export function NotesView({ campaignId }: { campaignId: number }) {
   const uploadFiles = useNotesStore((s) => s.uploadFiles);
   const removeDocument = useNotesStore((s) => s.removeDocument);
   const setError = useNotesStore((s) => s.setError);
+  const providers = useNotesStore((s) => s.providers);
+  const providerError = useNotesStore((s) => s.providerError);
+  const fetchProviders = useNotesStore((s) => s.fetchProviders);
+  const retryDocuments = useNotesStore((s) => s.retryDocuments);
+  const cancelUpload = useNotesStore((s) => s.cancelUpload);
 
   const refreshContents = useCampaignStore((s) => s.refreshContents);
   const campaignName = useCampaignStore((s) => s.active?.name ?? "");
@@ -40,7 +45,9 @@ export function NotesView({ campaignId }: { campaignId: number }) {
 
   useEffect(() => {
     void fetchDocuments(campaignId);
-  }, [campaignId, fetchDocuments]);
+    void fetchProviders();
+    return () => useNotesStore.getState().close();
+  }, [campaignId, fetchDocuments, fetchProviders]);
 
   const handleFiles = useCallback(
     (list: FileList | null) => {
@@ -84,16 +91,33 @@ export function NotesView({ campaignId }: { campaignId: number }) {
   const totalTokens = documents.reduce((sum, d) => sum + d.tokens, 0);
   const totalChunks = documents.reduce((sum, d) => sum + d.chunkCount, 0);
   const unsummarized = documents.filter((d) => d.summary === "").length;
+  const retryable = documents.filter((doc) => doc.retrySourceAvailable &&
+    (doc.indexStatus !== "indexed" || doc.summaryStatus !== "ready"));
+  const uploadDisabled = isUploading || providers === null;
 
   return (
     <div className="notes-view">
       <header className="notes-view-head">
         <h1 className="notes-view-title">Notes</h1>
         <p className="notes-view-sub">
-          Everything uploaded here belongs to <strong>{campaignName}</strong> and is searched only
-          when answering questions about it.
+          Everything uploaded here belongs to <strong>{campaignName}</strong>.
+          Notes are indexed for this campaign; question answering is coming in milestone 2.
         </p>
       </header>
+
+      <div className="notes-providers" aria-live="polite">
+        {providers ? (
+          <>
+            <p>Embeddings: <strong>{providers.embeddings.provider} / {providers.embeddings.model}</strong>
+              {!providers.embeddings.configured && " — credentials missing"}</p>
+            <p>Summaries: <strong>{providers.summaries.provider} / {providers.summaries.model}</strong>
+              {!providers.summaries.configured && " — credentials missing"}</p>
+            <p>Notes are sent to these providers. The dungeon generation provider, including Ollama, does not change this.</p>
+            <p>Retry resumes missing work. Reindex rebuilds the selected note and may incur provider charges again.</p>
+          </>
+        ) : <p>{providerError ?? "Loading notes providers…"}</p>}
+        {providerError && <button onClick={() => void fetchProviders()}>Retry provider details</button>}
+      </div>
 
       <div
         className={`notes-drop${dragging ? " is-dragging" : ""}${isUploading ? " is-busy" : ""}`}
@@ -102,18 +126,23 @@ export function NotesView({ campaignId }: { campaignId: number }) {
           setDragging(true);
         }}
         onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        onClick={() => !isUploading && inputRef.current?.click()}
+        onDrop={(e) => { if (uploadDisabled) { e.preventDefault(); setDragging(false); } else onDrop(e); }}
+        onClick={() => !uploadDisabled && inputRef.current?.click()}
         role="button"
+        aria-disabled={uploadDisabled}
         tabIndex={0}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            if (!uploadDisabled) inputRef.current?.click();
+          }
         }}
       >
         <input
           ref={inputRef}
           type="file"
           multiple
+          disabled={uploadDisabled}
           accept={ACCEPT}
           className="notes-file-input"
           onChange={(e) => {
@@ -124,12 +153,24 @@ export function NotesView({ campaignId }: { campaignId: number }) {
         {isUploading ? (
           <>
             <LoadingSpinner />
-            <span className="notes-drop-hint">Indexing…</span>
+            <span className="notes-drop-hint">Processing notes…</span>
           </>
         ) : (
           <>
             <span className="notes-drop-title">Drop notes here</span>
             <span className="notes-drop-hint">.md or .txt — or click to browse</span>
+          </>
+        )}
+      </div>
+
+      <div className="notes-actions">
+        <span>Up to 20 files · 5 MiB each · 20 MiB total</span>
+        {isUploading ? <button onClick={cancelUpload}>Cancel processing</button> : (
+          <>
+            <button onClick={() => void fetchDocuments(campaignId)}>Refresh status</button>
+            {retryable.length > 0 && <button disabled={uploadDisabled} onClick={() => void retryDocuments(campaignId, retryable.map((doc) => doc.id))}>
+              Retry pending / failed{retryable.length > 20 ? " (next 20)" : ""}
+            </button>}
           </>
         )}
       </div>
@@ -150,17 +191,21 @@ export function NotesView({ campaignId }: { campaignId: number }) {
               <span className="notes-log-status">
                 {entry.status === "pending" && "…"}
                 {entry.status === "indexed" && `${entry.chunks ?? 0} chunks`}
-                {entry.status === "failed" && <span title={entry.error}>failed</span>}
+                {entry.status === "unchanged" && "unchanged"}
+                {entry.status === "partial" && "searchable · summary pending"}
+                {entry.status === "failed" && "failed"}
+                {entry.status === "cancelled" && "cancelled"}
               </span>
+              {entry.error && <p className="notes-file-error">{entry.error}</p>}
             </li>
           ))}
         </ul>
       )}
 
       {error !== null && (
-        <div className="notes-error">
+        <div className="notes-error" role="alert">
           <span>{error}</span>
-          <button onClick={() => setError(null)}>&times;</button>
+          <button aria-label="Dismiss notes error" onClick={() => setError(null)}>&times;</button>
         </div>
       )}
 
@@ -181,11 +226,22 @@ export function NotesView({ campaignId }: { campaignId: number }) {
                   <button
                     className="notes-item-remove"
                     title="Remove from the index"
+                    aria-label={`Remove ${doc.filename}`}
                     onClick={() => void removeNote(doc.id, doc.filename, doc.chunkCount)}
                   >
                     &times;
                   </button>
                 </div>
+                <p className="notes-item-state">
+                  {doc.activeIndexStatus === "indexed" ? `Search index: revision ${doc.activeRevision}`
+                    : doc.activeRevision > 0 ? "Legacy search data incomplete — reupload to repair" : "Not indexed yet"}
+                  {doc.latestRevision !== doc.activeRevision && ` · replacement ${doc.indexStatus}`}
+                  {doc.activeRevision > 0 && ` · summary ${doc.summaryStatus === "source-required" ? "needs original source" : doc.summaryStatus}`}
+                </p>
+                {(doc.indexError || doc.summaryError) && <p className="notes-file-error">{doc.indexError ?? doc.summaryError}</p>}
+                {!doc.retrySourceAvailable && <p className="notes-item-state">
+                  Original source unavailable. Reupload to reindex or create a missing summary. Existing search data is retained.
+                </p>}
                 {doc.summary !== "" && <div className="notes-item-summary">{doc.summary}</div>}
                 {doc.entities.length > 0 && (
                   <div className="notes-item-entities">
@@ -201,6 +257,16 @@ export function NotesView({ campaignId }: { campaignId: number }) {
                 )}
                 <div className="notes-item-meta">
                   {doc.chunkCount} chunks · {formatTokens(doc.tokens)} tokens
+                </div>
+                <div className="notes-actions">
+                  {doc.retrySourceAvailable && (doc.indexStatus !== "indexed" || doc.summaryStatus !== "ready") && (
+                    <button disabled={uploadDisabled} onClick={() => void retryDocuments(campaignId, [doc.id])}>
+                      {doc.indexStatus === "indexed" ? "Retry summary" : "Retry indexing"}
+                    </button>
+                  )}
+                  {doc.retrySourceAvailable && <button disabled={uploadDisabled} onClick={() => void retryDocuments(campaignId, [doc.id], true)}>
+                    Reindex this note
+                  </button>}
                 </div>
               </li>
             ))}

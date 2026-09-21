@@ -39,6 +39,16 @@ export interface NoteDocument {
   entities: string[];
   tokens: number;
   chunkCount: number;
+  activeRevision: number;
+  latestRevision: number;
+  sourceAvailable: boolean;
+  retrySourceAvailable: boolean;
+  activeIndexStatus: string;
+  indexStatus: string;
+  indexError: string | null;
+  summaryStatus: string;
+  summaryError: string | null;
+  embeddingModel: string | null;
 }
 
 /** A retrieval hit, carrying enough provenance for the agent to cite it. */
@@ -60,7 +70,7 @@ export interface EmbeddingProvider {
    * `kind` matters — asymmetric models embed a question differently from the
    * passage that answers it, and passing the wrong one quietly costs recall.
    */
-  embed(texts: string[], kind: "document" | "query"): Promise<Float32Array[]>;
+  embed(texts: string[], kind: "document" | "query", signal?: AbortSignal): Promise<Float32Array[]>;
 }
 
 /**
@@ -73,5 +83,10 @@ export interface SummarizerProvider {
   /** Provider label, for error messages and logs. */
   name: string;
   model: string;
-  summarize(filename: string, text: string): Promise<DocumentSummary>;
+  summarize(filename: string, text: string, signal?: AbortSignal): Promise<DocumentSummary>;
+}
+
+export interface NotesProviders {
+  embeddings: { provider: string; model: string; configured: boolean };
+  summaries: { provider: string; model: string; configured: boolean };
 }

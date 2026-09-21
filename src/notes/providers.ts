@@ -6,6 +6,7 @@ import {
   parseSummary,
 } from "./summary-spec.ts";
 import type { DocumentSummary, EmbeddingProvider, SummarizerProvider } from "./types.ts";
+import { setTimeout as delay } from "node:timers/promises";
 
 /**
  * How a provider is told to emit JSON.
@@ -83,9 +84,9 @@ function isRetryable(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
-async function backoff(attempt: number): Promise<void> {
+async function backoff(attempt: number, signal?: AbortSignal): Promise<void> {
   const ms = Math.min(500 * 2 ** attempt, 8000) + Math.random() * 250;
-  await new Promise((resolve) => setTimeout(resolve, ms));
+  await delay(ms, undefined, { signal });
 }
 
 function headers(config: OpenAICompatConfig): Record<string, string> {
@@ -99,7 +100,7 @@ function headers(config: OpenAICompatConfig): Record<string, string> {
   return base;
 }
 
-async function post(config: OpenAICompatConfig, path: string, body: unknown): Promise<unknown> {
+async function post(config: OpenAICompatConfig, path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
   let lastError = "";
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -107,14 +108,14 @@ async function post(config: OpenAICompatConfig, path: string, body: unknown): Pr
       method: "POST",
       headers: headers(config),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.any([AbortSignal.timeout(180_000), ...(signal ? [signal] : [])]),
     });
 
     if (response.ok) return response.json();
 
     lastError = `${response.status} ${(await response.text()).slice(0, 400)}`;
     if (!isRetryable(response.status)) break;
-    await backoff(attempt);
+    await backoff(attempt, signal);
   }
 
   throw new Error(`${config.model} request to ${path} failed: ${lastError}`);
@@ -148,7 +149,7 @@ export function createOpenAICompatSummarizer(config: OpenAICompatConfig): Summar
     name: `openai-compat:${new URL(config.baseUrl).host}`,
     model: config.model,
 
-    async summarize(filename: string, text: string): Promise<DocumentSummary> {
+    async summarize(filename: string, text: string, signal?: AbortSignal): Promise<DocumentSummary> {
       const data = (await post(config, "chat/completions", {
         model: config.model,
         max_tokens: SUMMARY_MAX_TOKENS,
@@ -157,7 +158,7 @@ export function createOpenAICompatSummarizer(config: OpenAICompatConfig): Summar
           { role: "user", content: buildSummaryPrompt(filename, text) },
         ],
         ...responseFormat(mode),
-      })) as ChatResponse;
+      }, signal)) as ChatResponse;
 
       const content = data.choices?.[0]?.message?.content;
       if (typeof content !== "string" || content.trim() === "") {
@@ -171,6 +172,7 @@ export function createOpenAICompatSummarizer(config: OpenAICompatConfig): Summar
 // ─── embeddings ───────────────────────────────────────────────────────────────
 
 interface EmbeddingResponse {
+  model?: string;
   data?: Array<{ embedding?: number[]; index?: number }>;
 }
 
@@ -202,7 +204,7 @@ export function createOpenAICompatEmbedder(config: OpenAICompatConfig): Embeddin
   return {
     model: config.model,
 
-    async embed(texts) {
+    async embed(texts, _kind, signal) {
       if (texts.length === 0) return [];
       const out: Float32Array[] = [];
 
@@ -210,7 +212,11 @@ export function createOpenAICompatEmbedder(config: OpenAICompatConfig): Embeddin
         const data = (await post(config, "embeddings", {
           model: config.model,
           input: group,
-        })) as EmbeddingResponse;
+        }, signal)) as EmbeddingResponse;
+
+        if (data.model !== undefined && data.model !== config.model) {
+          throw new Error(`Embedding model mismatch: requested ${config.model}, received ${data.model}`);
+        }
 
         const rows = data.data ?? [];
         if (rows.length !== group.length) {
@@ -223,8 +229,9 @@ export function createOpenAICompatEmbedder(config: OpenAICompatConfig): Embeddin
         // rather than trust it, because a silent shuffle maps every chunk to the
         // wrong vector and nothing downstream can detect it.
         const sorted = [...rows].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-        for (const row of sorted) {
-          if (!Array.isArray(row.embedding)) {
+        for (const [index, row] of sorted.entries()) {
+          if (row.index !== index) throw new Error("Invalid or duplicate embedding response index");
+          if (!Array.isArray(row.embedding) || row.embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
             throw new Error(`${config.model} returned a row with no embedding`);
           }
           out.push(Float32Array.from(row.embedding));

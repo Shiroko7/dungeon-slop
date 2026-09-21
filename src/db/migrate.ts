@@ -184,5 +184,17 @@ export function runMigrations(db: Database): MigrationReport {
     db.run("ALTER TABLE dungeons ADD COLUMN fork_operation_id TEXT");
   }
 
+  // Existing search rows survive verbatim. Original text cannot be inferred
+  // reliably from overlapping chunks; NULL explicitly means reupload required.
+  if (tableExists(db, "documents") && !columnNames(db, "documents").includes("active_revision")) {
+    db.transaction(() => {
+      db.run("ALTER TABLE documents ADD COLUMN active_revision INTEGER NOT NULL DEFAULT 1");
+      db.run("ALTER TABLE documents ADD COLUMN latest_revision INTEGER NOT NULL DEFAULT 1");
+    })();
+  }
+  if (tableExists(db, "chunks") && !columnNames(db, "chunks").includes("source_revision")) {
+    db.run("ALTER TABLE chunks ADD COLUMN source_revision INTEGER NOT NULL DEFAULT 1");
+  }
+
   return { from, to: SCHEMA_VERSION, documentsAdopted };
 }

@@ -1,10 +1,10 @@
 # Dungeon Slop — Task Tracker
 
-Updated 2026-09-20. [ROADMAP.md](ROADMAP.md) is the authoritative plan, including
+Updated 2026-09-21. [ROADMAP.md](ROADMAP.md) is the authoritative plan, including
 scope, dependencies, and acceptance criteria. This file tracks execution. The
-September review and roadmap are complete. M1.1 is implemented on its review branch,
-with automated checks passing; browser verification is pending. See the
-[M1.1 review guide](docs/M1.1-REVIEW.md) for limits and remaining checks.
+September review and roadmap are complete. M1.1–M1.3 are merged. M1.4 is implemented
+on its review branch with automated checks passing; live browser verification is
+pending. See the [M1.4 review guide](docs/M1.4-REVIEW.md) for limits and remaining checks.
 
 ## Next: milestone 1 in four PRs
 
@@ -13,30 +13,33 @@ migrations, and regression tests together; do not open one PR per checkbox.
 
 | Order | PR / review unit | Status | Depends on |
 | --- | --- | --- | --- |
-| M1.1 | Reliable requests, saves, and local data ownership | DRAFT — browser verification pending | — |
-| M1.2 | Safe drafts, authored revisions, and generation/fork adoption | PLANNED | M1.1 |
-| M1.3 | Consistent geometry, features, and connectivity after edits | PLANNED | M1.1 + M1.2 |
-| M1.4 | Atomic, recoverable note ingestion | PLANNED | M1.1 |
+| M1.1 | Reliable requests, saves, and local data ownership | MERGED ([#1](https://github.com/Shiroko7/dungeon-slop/pull/1)); browser checks pending | — |
+| M1.2 | Safe drafts, authored revisions, and generation/fork adoption | MERGED ([#2](https://github.com/Shiroko7/dungeon-slop/pull/2)); browser checks pending | M1.1 |
+| M1.3 | Consistent geometry, features, and connectivity after edits | MERGED ([#3](https://github.com/Shiroko7/dungeon-slop/pull/3)); browser checks pending | M1.1 + M1.2 |
+| M1.4 | Atomic, recoverable note ingestion | IMPLEMENTED — draft review; browser checks pending | M1.1 |
 
 M1.4 is otherwise independent; the default order remains M1.1 → M1.2 → M1.3 → M1.4
 to keep review sequential. The detailed PR contracts are in
 [milestone 1](ROADMAP.md#m1--protect-work).
 
-- [ ] **M1.1:** owner/revision-bound operations; stale-load guards; cancellation;
+- [x] **M1.1:** owner/revision-bound operations; stale-load guards; cancellation;
       ordered, acknowledged, recoverable saves; conflict/recovery UI; API ownership
       validation; loopback listener; regression scenarios and migration checks.
-- [ ] **M1.2:** room-specific drafts and native text undo; persisted authorship
+- [x] **M1.2:** room-specific drafts and native text undo; persisted authorship
       checkpoints; safe new versions for Generate/Reroll/Refine; preserved original
       plans; visible fork adoption; schema/room-ID validation; safe chat editing;
       reachable describe-missing action; failure and retry scenarios.
-- [ ] **M1.3:** reconcile cells, room footprints, features, corridor endpoints,
+- [x] **M1.3:** reconcile cells, room footprints, features, corridor endpoints,
       connections, walls, and reports; interpolate strokes; define room split/merge
       identity and content recovery; consistent undo/reload/rendering; edit invariants.
-- [ ] **M1.4:** stored source revisions; unchanged-upload no-op; staged atomic index
+- [x] **M1.4:** stored source revisions; unchanged-upload no-op; staged atomic index
       replacement; concurrency/model checks; separate summary retries; correct
       backfill; bounded uploads; visible notes providers; legacy-preserving migration.
 - [ ] **M1 exit gate:** all package acceptance scenarios pass, schema upgrades retain
       existing data, recovery limits are documented, and README claims match delivery.
+
+Implementation checkmarks are not browser sign-off. The M1 exit gate remains open
+until the outstanding interactive review checklists are completed.
 
 ## Subsequent milestones
 
@@ -124,13 +127,13 @@ PR-level acceptance requirements are in [the roadmap](ROADMAP.md#verification-an
 
 | Area | Current state | Follow-up |
 | --- | --- | --- |
-| BSP/cellular generation, corridors, shapes, features | Implemented, with invariant tests | Preserve guarantees through edits; M1.3 |
+| BSP/cellular generation, corridors, shapes, features | Implemented; committed edits reconcile derived geometry | Interactive M1.3 review |
 | AI config, blueprint, narration, refinement | Implemented, not connected to campaign retrieval | Ownership/authorship in M1; grounding in M2 |
-| Campaign/dungeon/chat ownership and migrations | Implemented; current schema version is 4 | Revision/recovery migrations in M1 |
-| SQLite persistence and autosave | Implemented, with reproduced failure/race defects | M1.1 |
-| Reroll-as-fork and manual descriptions | Implemented with preservation/adoption gaps | M1.2 |
-| Canvas editor | Implemented; derived data can become inconsistent | M1.3 |
-| Note ingestion and campaign note library | Implemented; replacement/deduplication/retry gaps | M1.4 |
+| Campaign/dungeon/chat ownership and migrations | Implemented; current schema version is 7 | Preserve ownership through M2 |
+| SQLite persistence and autosave | Revision-checked queue, conflicts and bounded recovery | Interactive M1.1 review |
+| Reroll-as-fork and manual descriptions | Authored checkpoints, persistent drafts and idempotent forks | Interactive M1.2 review |
+| Canvas editor | Reconciles derived data and matching undo/redo state | Interactive M1.3 review |
+| Note ingestion and campaign note library | Atomic replacement, stored sources and stage-specific retries | M1.4 draft review |
 | Shared static renderer | Live map and exports share `renderStaticLayers` | Keep it shared |
 | Visual motifs | Default, Infernal, Aquatic have palettes; five fall back | M4.1 |
 | PNG/PDF/VTT and description exports | Implemented; correctness/audience/size gaps | M3.1 |

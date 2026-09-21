@@ -6,12 +6,13 @@ plans rooms and connections and a narrator that writes room descriptions.
 Runs locally on Bun + SQLite. The name undersells it; the test suite does not.
 
 ```
-1320 pass · 0 fail · 18 files
+1362 pass · 0 fail · 24 files
 ```
 
-M1.1 verification: 2026-09-20. Rust also has 28 baseline passing tests. New tests
-cover request ownership, save recovery and conflicts; authorship, editor and export
-corrections remain on the roadmap. Browser verification for M1.1 is pending.
+M1.4 automated verification: 2026-09-21. Rust has 28 baseline passing tests (not
+rerun for this notes-only change). Coverage now includes save recovery, authored
+revisions, edit reconciliation, and recoverable note ingestion. Live browser
+verification remains pending; export corrections remain on the roadmap.
 
 See [ROADMAP.md](ROADMAP.md) for the four milestones and detailed PR scopes, and
 [TASKS.md](TASKS.md) for execution status. Milestone 1 is grouped into four PRs:
@@ -84,8 +85,8 @@ The pipeline:
 4. **Layout rules** (`layout-rules.ts`) assign room roles, enforce a corridor
    budget, and check for loops — because a dungeon that is a pure tree plays
    badly and a dungeon that is all loops has no tension.
-5. **Walls** are derived from floor adjacency during generation. Keeping them
-   consistent after manual editing is part of milestone 1.
+5. **Walls** are derived from floor adjacency. Committed manual edits reconcile
+   geometry, features, connectivity, and layout warnings together.
 
 ### The tests are invariants, not snapshots
 
@@ -124,10 +125,18 @@ reproducible cost estimates are planned in milestone 3.
 
 ## Notes ingestion and planned retrieval
 
-`src/notes/` chunks documents with token estimation and overlap (`chunker.ts`),
-records content hashes, embeds chunks, and stores vectors and summaries. Unchanged
-uploads still repeat processing, and failed replacement can remove the previous
-index; atomic replacement and deduplication are M1.4 work.
+`src/notes/` stores original text and stable document revisions, then builds and
+validates chunks/vectors before atomically replacing the active index. A failed
+replacement keeps the previous index and summary. Unchanged completed uploads make
+no provider calls; a failed summary can be retried without re-embedding.
+
+The Notes library shows embedding/summary providers, per-file outcomes, cancellation,
+Retry, and per-note Reindex. Uploads are limited to 20 files, 5 MiB per file, and
+20 MiB total. Legacy notes keep their existing search data; reupload is required
+only when an operation needs their unavailable original source. Current active and
+latest attempted source texts are retained, not an unlimited revision history.
+See [M1.4 review and recovery limits](docs/M1.4-REVIEW.md) for migration, restart,
+model compatibility, retention, and verification details.
 
 Campaign-scoped hybrid retrieval using FTS5 and vector similarity is planned in M2.1.
 
@@ -164,7 +173,7 @@ calls, so call count varies with the chosen workflow and number of rooms. Ollama
 supports local generation; configure notes providers separately.
 
 ```bash
-bun test                # 1320 tests
+bun test                # 1362 tests
 bun run build
 ```
 
@@ -191,10 +200,10 @@ schema is SQL and the migrations are explicit.
   a second floor. Multi-level is a data model change, not a rendering one.
 - Campaign retrieval and Loremaster answers are not implemented. Current AI output
   relies on the prompt/chat and can invent details; it has no verified note citations.
-- Saving, navigation during AI requests, manual map edits, and regeneration have
-  known preservation defects. See milestone 1 for the concrete fixes and checks.
-- Local single-user app. No auth, no multi-user, no hosted mode. Explicit loopback
-  binding is planned in M1.1; do not assume the current listener is loopback-only.
+- Recovery is bounded, not a backup system. Review the M1 operating notes and keep
+  backups of your SQLite database. Live-browser acceptance checks are still pending.
+- Local single-user app. No auth, no multi-user, no hosted mode. The API binds to
+  loopback; do not expose it as a hosted service.
 - Five of eight visual motifs currently fall back to the default palette.
-- Room descriptions are regenerated wholesale rather than edited in place, so a
-  hand-tweaked description is lost if you re-narrate that room.
+- Narration still replaces room prose as a whole; previous authored values are
+  checkpointed for restoration. It is not a granular collaborative text editor.

@@ -171,7 +171,7 @@ describe("ingestDocument", () => {
     await ingestDocument(db, fakeEmbedder(64, "model-a"), noSummarizer, input, { deferSummary: true });
 
     await expect(
-      ingestDocument(db, fakeEmbedder(128, "model-a"), noSummarizer, input, { deferSummary: true }),
+      ingestDocument(db, fakeEmbedder(128, "model-a"), noSummarizer, { ...input, content: SESSION + "Changed" }, { deferSummary: true }),
     ).rejects.toThrow(/mismatch/i);
   });
 

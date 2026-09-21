@@ -8,6 +8,8 @@ import {
   handleDeleteNote,
   handleListNotes,
   handleUploadNotes,
+  handleRetryNotes,
+  handleNotesProviders,
 } from "./upload-notes.ts";
 import {
   handleCreateCampaign,
@@ -64,6 +66,16 @@ interface Route {
 }
 
 const routes: Route[] = [
+  {
+    method: "GET",
+    pattern: /^\/api\/notes\/providers$/,
+    handle: () => handleNotesProviders(),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/campaigns\/(\d+)\/notes\/retry$/,
+    handle: (req, [id]) => handleRetryNotes(req, id!),
+  },
   // ─── campaigns ────────────────────────────────────────────────────────────
   {
     method: "GET",

@@ -14,7 +14,7 @@ import type {
 } from "../campaign/types.ts";
 import type { Dungeon } from "../engine/types.ts";
 import type { DungeonConfig } from "../ai/schema.ts";
-import type { NoteDocument } from "../notes/types.ts";
+import type { NoteDocument, NotesProviders } from "../notes/types.ts";
 import type { UsageReport } from "../usage/types.ts";
 
 /**
@@ -200,6 +200,7 @@ export const api = {
   },
 
   notes: {
+    providers: () => request<NotesProviders>("/api/notes/providers"),
     list: (campaignId: number) =>
       request<{ documents: NoteDocument[] }>(
         `/api/campaigns/${campaignId}/notes`,
