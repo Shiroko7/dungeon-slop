@@ -12,6 +12,8 @@ import { DungeonContext } from "./DungeonContext.tsx";
 import { CampaignPicker } from "../views/CampaignPicker.tsx";
 import { CampaignHome } from "../views/CampaignHome.tsx";
 import { NotesView } from "../views/NotesView.tsx";
+import { NoteReaderView } from "../views/NoteReaderView.tsx";
+import { useNoteSearchStore } from "../../store/note-search-store.ts";
 import { UsageView } from "../views/UsageView.tsx";
 import { ChatView } from "../views/ChatView.tsx";
 import { DungeonView } from "../views/DungeonView.tsx";
@@ -62,6 +64,11 @@ export function AppShell() {
     if (route.view !== "notes") useNotesStore.getState().close();
   }, [route.view]);
 
+  useEffect(() => {
+    if (route.view === "notes" || route.view === "note") useNoteSearchStore.getState().open(route.campaignId);
+    else useNoteSearchStore.getState().close();
+  }, [route.view, campaignId]);
+
   // Leaving a dungeon flushes its pending autosave and drops the working copy,
   // so the next one cannot inherit stale geometry.
   useEffect(() => {
@@ -101,7 +108,11 @@ export function AppShell() {
       workspace = <CampaignHome campaignId={route.campaignId} />;
       break;
     case "notes":
-      workspace = <NotesView campaignId={route.campaignId} />;
+      workspace = <NotesView key={route.campaignId} campaignId={route.campaignId} />;
+      break;
+    case "note":
+      workspace = <NoteReaderView key={`${route.campaignId}:${route.documentId}:${route.revision}:${route.chunkId}`}
+        campaignId={route.campaignId} documentId={route.documentId} revision={route.revision} chunkId={route.chunkId} />;
       break;
     case "usage":
       workspace = <UsageView campaignId={route.campaignId} />;

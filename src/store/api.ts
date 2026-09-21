@@ -15,6 +15,7 @@ import type {
 import type { Dungeon } from "../engine/types.ts";
 import type { DungeonConfig } from "../ai/schema.ts";
 import type { NoteDocument, NotesProviders } from "../notes/types.ts";
+import type { NoteReader, NoteSearchInput, NoteSearchResult } from "../notes/retrieval-types.ts";
 import type { UsageReport } from "../usage/types.ts";
 
 /**
@@ -200,6 +201,10 @@ export const api = {
   },
 
   notes: {
+    search: (campaignId: number, input: NoteSearchInput, signal?: AbortSignal) =>
+      request<NoteSearchResult>(`/api/campaigns/${campaignId}/notes/search`, { ...postJson(input), signal }),
+    read: (campaignId: number, documentId: number, revision: number, chunkId?: number, signal?: AbortSignal) =>
+      request<NoteReader>(`/api/campaigns/${campaignId}/notes/${documentId}/revisions/${revision}${chunkId === undefined ? "" : `?chunk=${chunkId}`}`, { signal }),
     providers: () => request<NotesProviders>("/api/notes/providers"),
     list: (campaignId: number) =>
       request<{ documents: NoteDocument[] }>(

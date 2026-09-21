@@ -6,12 +6,12 @@ plans rooms and connections and a narrator that writes room descriptions.
 Runs locally on Bun + SQLite. The name undersells it; the test suite does not.
 
 ```
-1362 pass · 0 fail · 24 files
+1390 pass · 0 fail · 29 files
 ```
 
-M1.4 automated verification: 2026-09-21. Rust has 28 baseline passing tests (not
-rerun for this notes-only change). Coverage now includes save recovery, authored
-revisions, edit reconciliation, and recoverable note ingestion. Live browser
+M2.1 automated verification: 2026-09-21. Rust has 28 baseline passing tests (not
+rerun for this notes-only change). Coverage includes save recovery, authored
+revisions, edit reconciliation, recoverable ingestion, source reading and retrieval. Live browser
 verification remains pending; export corrections remain on the roadmap.
 
 See [ROADMAP.md](ROADMAP.md) for the four milestones and detailed PR scopes, and
@@ -31,8 +31,8 @@ reach." It retrieves relevant notes and produces a **blueprint** — rooms, role
 adjacency — the procedural engine lays that out as real geometry, and the narrator
 writes rooms consistent with the map and those sources.
 
-**Today:** prompt/chat-driven planning, procedural layout, narration, editing, and
-note ingestion exist. Retrieval is not connected to the Architect or Narrator,
+**Today:** prompt/chat-driven planning, procedural layout, narration, editing,
+note ingestion, source reading and campaign search exist. Retrieval is not connected to the Architect or Narrator,
 and the Loremaster saves questions but does not answer. Completing that connection
 is milestone 2, after protecting existing work in milestone 1.
 
@@ -123,7 +123,7 @@ Generation token usage is recorded in `usage_events`, with a tested pricing modu
 calls are not yet included. This is not a complete billing record; coverage and
 reproducible cost estimates are planned in milestone 3.
 
-## Notes ingestion and planned retrieval
+## Notes ingestion, source reader and retrieval
 
 `src/notes/` stores original text and stable document revisions, then builds and
 validates chunks/vectors before atomically replacing the active index. A failed
@@ -138,7 +138,23 @@ latest attempted source texts are retained, not an unlimited revision history.
 See [M1.4 review and recovery limits](docs/M1.4-REVIEW.md) for migration, restart,
 model compatibility, retention, and verification details.
 
-Campaign-scoped hybrid retrieval using FTS5 and vector similarity is planned in M2.1.
+The Notes library now offers local keyword search, semantic search, and hybrid
+rank fusion, with explicit source selection and an estimated context budget.
+Semantic/hybrid searches send the query to the configured notes embedding provider
+and may incur charges. Keyword search needs no key. Model mismatch or provider
+failure gives an actionable warning; hybrid can fall back to keyword results.
+
+Open a filename, heading, or result to read its source revision and highlighted
+passage. Old links never silently switch to a replacement: a removed revision is
+explicitly unavailable. Legacy notes show stored chunks when exact text is missing.
+The reader displays source text rather than executing embedded HTML.
+
+`bun run eval:retrieval` runs a fixed 36-query, two-campaign synthetic benchmark:
+keyword hit@5 **84.8%**, semantic and hybrid **100%**, with **zero cross-campaign
+results**. These are deterministic integration results, not cloud-model quality
+claims. See [M2.1 review, API and limits](docs/M2.1-REVIEW.md) and the
+[checked-in evaluation report](docs/M2.1-EVAL.json). Search retrieves evidence;
+it does not generate answers or determine whether a claim is supported.
 
 The point is that a 200-page campaign wiki does not fit in a context window, and
 stuffing in the first 8k tokens of it gets you a dungeon themed around your
@@ -173,7 +189,8 @@ calls, so call count varies with the chosen workflow and number of rooms. Ollama
 supports local generation; configure notes providers separately.
 
 ```bash
-bun test                # 1362 tests
+bun test                # 1390 tests
+bun run eval:retrieval  # synthetic notes only; no paid calls
 bun run build
 ```
 
@@ -198,7 +215,7 @@ schema is SQL and the migrations are explicit.
 
 - **Single level per dungeon.** Stairs render as features but do not connect to
   a second floor. Multi-level is a data model change, not a rendering one.
-- Campaign retrieval and Loremaster answers are not implemented. Current AI output
+- Loremaster answers and retrieval-grounded generation are not implemented. Current AI output
   relies on the prompt/chat and can invent details; it has no verified note citations.
 - Recovery is bounded, not a backup system. Review the M1 operating notes and keep
   backups of your SQLite database. Live-browser acceptance checks are still pending.

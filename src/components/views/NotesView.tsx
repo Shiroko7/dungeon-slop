@@ -4,6 +4,8 @@ import { useCampaignStore } from "../../store/campaign-store.ts";
 import { SUPPORTED_EXTENSIONS } from "../../notes/shared.ts";
 import { LoadingSpinner } from "../shared/LoadingSpinner.tsx";
 import { countLine, useConfirm } from "../shared/ConfirmDialog.tsx";
+import { NoteSearch } from "./NoteSearch.tsx";
+import { linkProps, paths } from "../../router/router.ts";
 
 const ACCEPT = SUPPORTED_EXTENSIONS.join(",");
 
@@ -101,9 +103,11 @@ export function NotesView({ campaignId }: { campaignId: number }) {
         <h1 className="notes-view-title">Notes</h1>
         <p className="notes-view-sub">
           Everything uploaded here belongs to <strong>{campaignName}</strong>.
-          Notes are indexed for this campaign; question answering is coming in milestone 2.
+          Search and inspect its source passages below. Loremaster answers are coming in M2.2.
         </p>
       </header>
+
+      <NoteSearch campaignId={campaignId} documents={documents} providers={providers} />
 
       <div className="notes-providers" aria-live="polite">
         {providers ? (
@@ -220,9 +224,10 @@ export function NotesView({ campaignId }: { campaignId: number }) {
             {documents.map((doc) => (
               <li key={doc.id} className="notes-item">
                 <div className="notes-item-head">
-                  <span className="notes-item-name" title={doc.filename}>
+                  <a className="notes-item-name" title={doc.filename}
+                    {...linkProps(paths.note(campaignId, doc.id, doc.activeRevision || doc.latestRevision))}>
                     {doc.filename}
-                  </span>
+                  </a>
                   <button
                     className="notes-item-remove"
                     title="Remove from the index"

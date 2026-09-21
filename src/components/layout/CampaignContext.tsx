@@ -257,7 +257,7 @@ export function CampaignContext({ route }: { route: Route }) {
         </Group>
 
         <a
-          className={`ctx-notes-link${route.view === "notes" ? " is-active" : ""}`}
+          className={`ctx-notes-link${route.view === "notes" || route.view === "note" ? " is-active" : ""}`}
           {...linkProps(paths.notes(campaignId))}
         >
           <span className="ctx-group-title">Notes</span>

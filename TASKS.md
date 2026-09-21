@@ -2,11 +2,11 @@
 
 Updated 2026-09-21. [ROADMAP.md](ROADMAP.md) is the authoritative plan, including
 scope, dependencies, and acceptance criteria. This file tracks execution. The
-September review and roadmap are complete. M1.1–M1.3 are merged. M1.4 is implemented
+September review and roadmap are complete. M1.1–M1.4 are merged. M2.1 is implemented
 on its review branch with automated checks passing; live browser verification is
-pending. See the [M1.4 review guide](docs/M1.4-REVIEW.md) for limits and remaining checks.
+pending. See the [M2.1 review guide](docs/M2.1-REVIEW.md) for limits and remaining checks.
 
-## Next: milestone 1 in four PRs
+## Milestone 1 in four PRs
 
 Review and merge one complete behavior at a time. Include its UI, API, persistence,
 migrations, and regression tests together; do not open one PR per checkbox.
@@ -16,7 +16,7 @@ migrations, and regression tests together; do not open one PR per checkbox.
 | M1.1 | Reliable requests, saves, and local data ownership | MERGED ([#1](https://github.com/Shiroko7/dungeon-slop/pull/1)); browser checks pending | — |
 | M1.2 | Safe drafts, authored revisions, and generation/fork adoption | MERGED ([#2](https://github.com/Shiroko7/dungeon-slop/pull/2)); browser checks pending | M1.1 |
 | M1.3 | Consistent geometry, features, and connectivity after edits | MERGED ([#3](https://github.com/Shiroko7/dungeon-slop/pull/3)); browser checks pending | M1.1 + M1.2 |
-| M1.4 | Atomic, recoverable note ingestion | IMPLEMENTED — draft review; browser checks pending | M1.1 |
+| M1.4 | Atomic, recoverable note ingestion | MERGED ([#4](https://github.com/Shiroko7/dungeon-slop/pull/4)); browser checks pending | M1.1 |
 
 M1.4 is otherwise independent; the default order remains M1.1 → M1.2 → M1.3 → M1.4
 to keep review sequential. The detailed PR contracts are in
@@ -48,13 +48,26 @@ changes together and update the roadmap if evidence changes scope.
 
 | Milestone | Proposed packages | Status |
 | --- | --- | --- |
-| M2 — Complete the defining workflow | M2.1 reader/retrieval/evaluation; M2.2 Loremaster; M2.3 grounded Architect/Narrator | PLANNED |
+| M2 — Complete the defining workflow | M2.1 reader/retrieval/evaluation; M2.2 Loremaster; M2.3 grounded Architect/Narrator | M2.1 IMPLEMENTED — draft review; M2.2/M2.3 PLANNED |
 | M3 — Make it comfortable at the table | M3.1 exports; M3.2 creation/workspace/accessibility; M3.3 library/recovery; M3.4 providers/usage | PLANNED |
 | M4 — Expand after measuring | Themes; encounter/session preparation; connected levels; measured Rust/WASM acceleration | CANDIDATES |
 
 Known export disclosure/format defects are tracked under M3.1 and remain unresolved.
 Treat current exports as GM material and inspect before sharing. A focused urgent
 correction can move earlier without pulling in the entire export redesign.
+
+### Current review unit: M2.1
+
+Reader deep links bind campaign/document/revision/chunk identity. Campaign-scoped
+keyword, semantic and hybrid search share source filtering, rank fusion, overlap
+deduplication, neighbor expansion, context budgets, provider validation and cancellation.
+The library exposes these diagnostics without an answering agent.
+
+Automated acceptance: 1,390 tests; type check and build pass. The fixed 36-query
+synthetic evaluation reports 84.8% keyword and 100% semantic/hybrid hit@5 with zero
+cross-campaign hits. No paid provider calls or live-database mutations. Interactive
+browser checks remain unverified, so this package is not marked complete. M2.2 is
+the next package after review/merge, not part of this PR.
 
 ## The model
 
@@ -133,11 +146,11 @@ PR-level acceptance requirements are in [the roadmap](ROADMAP.md#verification-an
 | SQLite persistence and autosave | Revision-checked queue, conflicts and bounded recovery | Interactive M1.1 review |
 | Reroll-as-fork and manual descriptions | Authored checkpoints, persistent drafts and idempotent forks | Interactive M1.2 review |
 | Canvas editor | Reconciles derived data and matching undo/redo state | Interactive M1.3 review |
-| Note ingestion and campaign note library | Atomic replacement, stored sources and stage-specific retries | M1.4 draft review |
+| Note ingestion and campaign note library | Atomic replacement, stored sources and stage-specific retries | M1.4 merged; interactive checks pending |
 | Shared static renderer | Live map and exports share `renderStaticLayers` | Keep it shared |
 | Visual motifs | Default, Infernal, Aquatic have palettes; five fall back | M4.1 |
 | PNG/PDF/VTT and description exports | Implemented; correctness/audience/size gaps | M3.1 |
-| Hybrid retrieval (former 7E) | Not implemented | M2.1 |
+| Hybrid retrieval (former 7E) | Campaign search, revision-bound reader, diagnostic API and synthetic evaluation implemented | M2.1 draft review |
 | Loremaster answers (former 7F) | Questions persist; answering not implemented | M2.2 |
 | Architect reads notes (former 7G) | Not implemented | M2.3 |
 | Usage ledger | Generation tokens tracked; cloud rates unset; notes calls missing | M3.4 |
