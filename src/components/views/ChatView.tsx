@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { useChatStore } from "../../store/chat-store.ts";
 import { useCampaignStore } from "../../store/campaign-store.ts";
+import { useAIStore } from "../../store/ai-store.ts";
 import { ChatThread } from "../shared/ChatThread.tsx";
 import { LoadingSpinner } from "../shared/LoadingSpinner.tsx";
 
 /**
  * A Loremaster thread: questions asked of the campaign's notes.
  *
- * The thread itself is real — messages persist against the campaign and survive
- * a reload. What is not wired yet is the answering: that needs hybrid retrieval
- * over the note index and a tool-running agent above it. Rather than fake a
- * reply, the view says so plainly and keeps the questions.
+ * A Loremaster thread is campaign-scoped. The answer path is streamed and its
+ * read-only research calls are persisted with the assistant message.
  */
 export function ChatView({
   campaignId,
@@ -21,15 +20,25 @@ export function ChatView({
 }) {
   const chat = useChatStore((s) => s.chat);
   const isLoading = useChatStore((s) => s.isLoading);
+  const isStreaming = useChatStore((s) => s.isStreaming);
+  const streamingText = useChatStore((s) => s.streamingText);
+  const turnTools = useChatStore((s) => s.turnTools);
+  const activeTool = useChatStore((s) => s.activeTool);
+  const turnStatus = useChatStore((s) => s.turnStatus);
   const error = useChatStore((s) => s.error);
   const openChat = useChatStore((s) => s.openChat);
-  const send = useChatStore((s) => s.send);
+  const askLoremaster = useChatStore((s) => s.askLoremaster);
+  const cancelAnswer = useChatStore((s) => s.cancelAnswer);
   const submitEdit = useChatStore((s) => s.submitEdit);
   const setError = useChatStore((s) => s.setError);
 
   const noteCount = useCampaignStore((s) => s.active?.noteCount ?? 0);
   const refreshContents = useCampaignStore((s) => s.refreshContents);
   const [noticeDismissed, setNoticeDismissed] = useState(false);
+  const provider = useAIStore((s) => s.provider);
+  const model = useAIStore((s) => s.model);
+  const temperature = useAIStore((s) => s.temperature);
+  const thinkingLevel = useAIStore((s) => s.thinkingLevel);
 
   useEffect(() => {
     void openChat(chatId);
@@ -37,11 +46,11 @@ export function ChatView({
 
   const handleSend = useCallback(
     async (text: string) => {
-      await send(text);
+      await askLoremaster(text, { provider, model, temperature, thinkingLevel });
       // The first message names the thread, so the context list needs re-reading.
       await refreshContents(campaignId);
     },
-    [send, refreshContents, campaignId],
+    [askLoremaster, refreshContents, campaignId, provider, model, temperature, thinkingLevel],
   );
 
   if (isLoading && chat === null) {
@@ -73,6 +82,10 @@ export function ChatView({
             ? "This campaign has no notes indexed yet"
             : `Asking across ${noteCount} indexed ${noteCount === 1 ? "note" : "notes"}`}
         </span>
+        <span className="view-sub chat-provider-disclosure">
+          Answering with {provider === "ollama" ? "Ollama (local)" : `${provider} · ${model ?? "default model"}`}
+          {provider === "ollama" ? "" : " · provider usage may incur charges"}
+        </span>
       </header>
 
       {error !== null && (
@@ -85,8 +98,9 @@ export function ChatView({
       {!noticeDismissed && (
         <div className="view-banner">
           <span>
-            Questions are saved to this thread, but the Loremaster does not
-            answer yet — retrieval over the note index is the next step.
+            The Loremaster searches this campaign's notes with read-only tools.
+            Answers distinguish documented facts from uncertainty; sources open at
+            the exact revision used.
           </span>
           <button onClick={() => setNoticeDismissed(true)}>&times;</button>
         </div>
@@ -94,7 +108,11 @@ export function ChatView({
 
       <ChatThread
         messages={chat.messages}
-        isBusy={false}
+        isBusy={isStreaming}
+        streamingText={streamingText}
+        activeTool={activeTool}
+        turnTools={turnTools}
+        turnStatus={turnStatus}
         emptyTitle="Ask this campaign something"
         emptyHint={
           noteCount === 0
@@ -104,6 +122,7 @@ export function ChatView({
         placeholder="Ask about your notes… (Ctrl+Enter to send)"
         onSend={(text) => void handleSend(text)}
         onEdit={submitEdit}
+        onCancel={cancelAnswer}
       />
     </div>
   );

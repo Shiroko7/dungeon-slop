@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { api } from "./api.ts";
-import type { ChatMessage, ChatRecord, Citation } from "../campaign/types.ts";
+import type { ChatMessage, ChatRecord, Citation, ToolCallRecord } from "../campaign/types.ts";
 
 /**
  * Whichever thread is open — a campaign's Loremaster thread or a dungeon's
@@ -14,6 +14,9 @@ interface ChatState {
   isStreaming: boolean;
   /** Partial assistant text as it arrives, before it becomes a message. */
   streamingText: string;
+  turnTools: ToolCallRecord[];
+  activeTool: string | null;
+  turnStatus: "idle" | "working" | "cancelled" | "failed";
   error: string | null;
 
   openChat: (id: number) => Promise<void>;
@@ -21,6 +24,8 @@ interface ChatState {
   close: () => void;
 
   send: (content: string) => Promise<boolean>;
+  askLoremaster: (content: string, options: { provider?: string; model?: string | null; temperature?: number; thinkingLevel?: string | null }) => Promise<boolean>;
+  cancelAnswer: () => void;
   recordAssistant: (
     content: string,
     citations?: Citation[] | null,
@@ -41,6 +46,7 @@ function message(err: unknown, fallback: string): string {
 /** Optimistic placeholder id — replaced when the server answers. */
 let localId = -1;
 let chatEpoch = 0;
+let answerAbort: AbortController | null = null;
 export function chatVersion() {
   return chatEpoch;
 }
@@ -50,6 +56,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   isLoading: false,
   isStreaming: false,
   streamingText: "",
+  turnTools: [],
+  activeTool: null,
+  turnStatus: "idle",
   error: null,
 
   setStreaming: (isStreaming) => set({ isStreaming }),
@@ -57,12 +66,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   setError: (error) => set({ error }),
 
   close: () => {
+    answerAbort?.abort(); answerAbort = null;
     ++chatEpoch;
     set({
       chat: null,
       isLoading: false,
       streamingText: "",
       isStreaming: false,
+      turnTools: [], activeTool: null, turnStatus: "idle",
       error: null,
     });
   },
@@ -72,7 +83,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     const update: typeof set = (partial) => {
       if (epoch === chatEpoch) set(partial);
     };
-    update({ isLoading: true, chat: null, streamingText: "" });
+    answerAbort?.abort(); answerAbort = null;
+    update({ isLoading: true, chat: null, streamingText: "", turnTools: [], activeTool: null, turnStatus: "idle" });
     try {
       update({ chat: await api.chats.get(id), error: null });
     } catch (err) {
@@ -87,7 +99,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     const update: typeof set = (partial) => {
       if (epoch === chatEpoch) set(partial);
     };
-    update({ isLoading: true, chat: null, streamingText: "" });
+    answerAbort?.abort(); answerAbort = null;
+    update({ isLoading: true, chat: null, streamingText: "", turnTools: [], activeTool: null, turnStatus: "idle" });
     try {
       const chat = await api.dungeons.architectChat(dungeonId);
       update({ chat, error: null });
@@ -118,6 +131,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       role: "user",
       content,
       citations: null,
+      toolCalls: null,
       createdAt: Date.now(),
     };
     update({ chat: { ...chat, messages: [...chat.messages, optimistic] } });
@@ -187,6 +201,48 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     } catch (err) {
       update({ error: message(err, "Could not edit that message") });
     }
+  },
+
+  askLoremaster: async (content, options) => {
+    const epoch = chatEpoch;
+    const chat = get().chat;
+    if (chat === null || chat.dungeonId !== null || get().isStreaming) return false;
+    const optimistic: ChatMessage = { id: localId--, role: "user", content, citations: null, toolCalls: null, createdAt: Date.now() };
+    set({ chat: { ...chat, messages: [...chat.messages, optimistic] }, isStreaming: true, streamingText: "",
+      turnTools: [], activeTool: null, turnStatus: "working", error: null });
+    const abort = new AbortController(); answerAbort = abort;
+    try {
+      for await (const event of api.chats.ask(chat.campaignId, chat.id, { question: content, ...options }, abort.signal)) {
+        if (epoch !== chatEpoch) return false;
+        if (event.type === "user" && event.message) {
+          const saved = event.message as ChatMessage;
+          set((state) => state.chat ? { chat: { ...state.chat, messages: state.chat.messages.map((m) => m.id === optimistic.id ? saved : m) } } : {});
+        } else if (event.type === "tool_start") {
+          set({ activeTool: String(event.name ?? "tool") });
+        } else if (event.type === "tool_result" && event.record) {
+          set((state) => ({ turnTools: [...state.turnTools, event.record as ToolCallRecord], activeTool: null }));
+        } else if (event.type === "token") {
+          set((state) => ({ streamingText: state.streamingText + String(event.text ?? "") }));
+        } else if (event.type === "complete" && event.message) {
+          const saved = event.message as ChatMessage;
+          set((state) => state.chat ? { chat: { ...state.chat, messages: [...state.chat.messages, saved] }, isStreaming: false,
+            streamingText: "", activeTool: null, turnStatus: "idle", turnTools: [] } : {});
+        }
+      }
+      if (epoch === chatEpoch && get().isStreaming) set({ isStreaming: false, activeTool: null, turnStatus: "failed", error: "The stream ended before the answer was saved. The draft is retained below." });
+      return epoch === chatEpoch;
+    } catch (err) {
+      if (epoch !== chatEpoch) return false;
+      const cancelled = abort.signal.aborted;
+      set({ isStreaming: false, activeTool: null, turnStatus: cancelled ? "cancelled" : "failed",
+        error: cancelled ? "Answer cancelled. The partial draft is retained below; you can retry the question." : message(err, "Could not answer that question. The partial draft is retained below.") });
+      return false;
+    } finally { if (answerAbort === abort) answerAbort = null; }
+  },
+
+  cancelAnswer: () => {
+    answerAbort?.abort();
+    set({ isStreaming: false, activeTool: null, turnStatus: "cancelled" });
   },
 
   submitEdit: async (index, content) => {

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../../campaign/types.ts";
 import { LoadingSpinner } from "./LoadingSpinner.tsx";
+import { linkProps, paths } from "../../router/router.ts";
+import type { ToolCallRecord } from "../../campaign/types.ts";
 
 interface ChatThreadProps {
   messages: ChatMessage[];
@@ -19,6 +21,10 @@ interface ChatThreadProps {
   footer?: React.ReactNode;
   /** Rendered under the composer, e.g. a hint that a reply is expected. */
   hint?: React.ReactNode;
+  onCancel?: () => void;
+  activeTool?: string | null;
+  turnTools?: ToolCallRecord[];
+  turnStatus?: "idle" | "working" | "cancelled" | "failed";
 }
 
 /**
@@ -40,6 +46,10 @@ export function ChatThread({
   disabled = false,
   footer,
   hint,
+  onCancel,
+  activeTool = null,
+  turnTools = [],
+  turnStatus = "idle",
 }: ChatThreadProps) {
   const [draft, setDraft] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -82,11 +92,12 @@ export function ChatThread({
           <div key={msg.id} className={`chat-msg chat-msg--${msg.role}`}>
             <div className="chat-msg-bubble">{msg.content}</div>
 
-            {msg.citations !== null && msg.citations.length > 0 && (
+            {msg.citations !== null && msg.citations !== undefined && msg.citations.length > 0 && (
               <ul className="chat-citations">
                 {msg.citations.map((c, n) => (
                   <li key={`${c.chunkId}-${n}`} className="chat-citation">
-                    <span className="chat-citation-file">{c.filename}</span>
+                    {c.campaignId !== undefined && c.revision !== undefined ? <a className="chat-citation-file" {...linkProps(paths.note(c.campaignId, c.docId, c.revision, c.chunkId))}>{c.filename}</a>
+                      : <span className="chat-citation-file">{c.filename}</span>}
                     {c.headingPath !== "" && (
                       <span className="chat-citation-path">{c.headingPath}</span>
                     )}
@@ -94,6 +105,20 @@ export function ChatThread({
                   </li>
                 ))}
               </ul>
+            )}
+
+            {msg.toolCalls !== null && msg.toolCalls !== undefined && msg.toolCalls.length > 0 && (
+              <details className="chat-tool-provenance">
+                <summary>Research used ({msg.toolCalls.length} read-only tool calls)</summary>
+                <ul>
+                  {msg.toolCalls.map((tool, index) => (
+                    <li key={`${tool.name}-${index}`}>
+                      <strong>{tool.name.replaceAll("_", " ")}</strong> · {tool.status}
+                      {tool.result ? ` — ${tool.result}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             )}
 
             {msg.role === "user" && onEdit !== undefined && (
@@ -122,11 +147,22 @@ export function ChatThread({
               ) : (
                 <span className="chat-typing">
                   <LoadingSpinner size={12} />
-                  <span>Thinking…</span>
+                  <span>{activeTool ? `Checking ${activeTool.replaceAll("_", " ")}…` : "Thinking…"}</span>
                 </span>
               )}
             </div>
           </div>
+        )}
+
+        {!isBusy && streamingText !== "" && (turnStatus === "cancelled" || turnStatus === "failed") && (
+          <div className="chat-msg chat-msg--assistant chat-msg--draft">
+            <div className="chat-msg-bubble"><strong>{turnStatus === "cancelled" ? "Cancelled draft" : "Unsent draft"}</strong><pre className="chat-streaming-text">{streamingText}</pre></div>
+          </div>
+        )}
+        {turnTools.length > 0 && !isBusy && (
+          <details className="chat-tool-provenance"><summary>Research used ({turnTools.length} read-only tool calls)</summary>
+            <ul>{turnTools.map((tool, index) => <li key={`${tool.name}-${index}`}><strong>{tool.name.replaceAll("_", " ")}</strong> · {tool.status}{tool.result ? ` — ${tool.result}` : ""}</li>)}</ul>
+          </details>
         )}
 
         {footer}
@@ -135,6 +171,7 @@ export function ChatThread({
 
       <div className="chat-compose">
         {hint}
+        {isBusy && onCancel !== undefined && <button type="button" className="chat-cancel-btn" onClick={onCancel}>Cancel answer</button>}
         {editingIndex !== null && (
           <div className="chat-editing-banner">
             Editing this message — the thread will change when you submit.

@@ -2039,6 +2039,14 @@ input:focus, select:focus, textarea:focus {
 .notes-log-item { flex-wrap: wrap; }
 .notes-drop[aria-disabled="true"] { cursor: default; }
 
+.chat-citation-file { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.chat-msg--draft { opacity: 0.85; }
+.chat-tool-provenance { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; color: var(--text-2); }
+.chat-tool-provenance summary { cursor: pointer; color: var(--text); }
+.chat-tool-provenance ul { margin: 8px 0 0 16px; display: grid; gap: 4px; }
+.chat-cancel-btn { align-self: flex-start; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); color: var(--text); cursor: pointer; }
+.chat-cancel-btn:hover, .chat-cancel-btn:focus-visible { border-color: var(--accent); }
+
 .notes-progress {
   margin-top: 8px;
   padding: 5px 8px;
