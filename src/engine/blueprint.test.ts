@@ -139,6 +139,17 @@ describe("a blueprint becomes the map it describes", () => {
     expect(warden.plan?.gating).toContain("the Forge key");
   });
 
+  test("constraint report distinguishes delivered graph from advisory requirements", () => {
+    expect(dungeon.report?.constraints?.requestedConnections).toBeGreaterThan(0);
+    expect(dungeon.report?.constraints?.deliveredConnections).toBe(
+      dungeon.report?.constraints?.requestedConnections,
+    );
+    expect(dungeon.report?.constraints?.unmetConnections).toHaveLength(0);
+    expect(dungeon.report?.constraints?.reachableRooms).toBe(plan().nodes.length);
+    expect(dungeon.report?.constraints?.unreachableRooms).toHaveLength(0);
+    expect(dungeon.report?.constraints?.unmetRequirements.some((item) => item.includes("Forge key"))).toBe(true);
+  });
+
   test("corridors stay inside budget", () => {
     const over = dungeon.corridors.filter(
       (c) => c.roomA >= 0 && c.roomB >= 0 && c.path.length > MAX_CORRIDOR_CELLS * 1.5,
@@ -204,6 +215,21 @@ describe("refine ops", () => {
     const ops: RefineOp[] = [{ op: "disconnect", from: "east-1", to: "west-1" }];
     const { results } = applyRefineOps(base, ops);
     expect(results[0]!.applied).toBe(true);
+  });
+
+  test("locked rooms and connections survive refinement", () => {
+    const locked = {
+      ...base,
+      nodes: base.nodes.map((node) => node.key === "hall" ? { ...node, locked: true } : node),
+      edges: base.edges.map((edge) => edge.from === "east-1" && edge.to === "west-1" ? { ...edge, locked: true } : edge),
+    };
+    const { blueprint, results } = applyRefineOps(locked, [
+      { op: "rename_room", key: "hall", name: "Changed" },
+      { op: "disconnect", from: "east-1", to: "west-1" },
+    ]);
+    expect(results.every((result) => !result.applied)).toBe(true);
+    expect(blueprint.nodes.find((node) => node.key === "hall")!.name).toBe("Great Hall");
+    expect(blueprint.edges.some((edge) => edge.from === "east-1" && edge.to === "west-1")).toBe(true);
   });
 
   test("removing the entrance or the boss is refused", () => {

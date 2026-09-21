@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { DungeonConfigSchema } from "../ai/schema.ts";
-import { BlueprintSchema } from "../ai/blueprint.ts";
+import { BlueprintSchema, GroundingProvenanceSchema } from "../ai/blueprint.ts";
 
 const id = z.number().int().nonnegative();
 // A hand-drawn corridor may intentionally end in open space. `-1` is the
@@ -46,6 +46,7 @@ export const RoomDescriptionSchema = z
     tricks: z.array(z.string()).optional(),
     notes: z.string().optional(),
     empty: z.boolean().optional(),
+    grounding: GroundingProvenanceSchema.optional(),
   })
   .strict();
 /** Stable narrator result: room identity travels with its content. */
@@ -118,6 +119,7 @@ export const OverviewSchema = z
       z.object({ label: z.string(), corridorId: id, description: z.string() }),
     ),
     wanderingMonsters: z.array(z.string()),
+    grounding: GroundingProvenanceSchema.optional(),
   })
   .strict();
 export const DungeonPatchSchema = z

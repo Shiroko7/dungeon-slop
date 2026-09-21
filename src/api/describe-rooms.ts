@@ -12,6 +12,10 @@ import type { DungeonConfig } from "../ai/schema.ts";
 import type { RoomDescription } from "../engine/types.ts";
 import type { AIMessage } from "../ai/types.ts";
 import { NarratorRoomResultSchema } from "./mutation-schema.ts";
+import { appDb } from "../db/context.ts";
+import { notesEmbedder } from "../notes/context.ts";
+import { GroundingSelectionSchema, retrieveGrounding } from "../ai/grounding.ts";
+import type { GroundingSelection } from "../ai/grounding-types.ts";
 
 interface DescribeRoomsBody {
   rooms: Room[];
@@ -30,6 +34,7 @@ interface DescribeRoomsBody {
   campaignId?: number;
   dungeonId?: number;
   chatId?: number;
+  grounding?: GroundingSelection;
 }
 
 interface DescribeRoomBody {
@@ -47,6 +52,7 @@ interface DescribeRoomBody {
   campaignId?: number;
   dungeonId?: number;
   chatId?: number;
+  grounding?: GroundingSelection;
 }
 
 function sseEvent(event: string, data: unknown): string {
@@ -79,6 +85,7 @@ export async function handleDescribeRooms(req: Request): Promise<Response> {
     chatId,
     sourcePrompt,
     conversationHistory,
+    grounding,
   } = body as DescribeRoomsBody;
 
   if (!Array.isArray(rooms) || !config) {
@@ -88,23 +95,40 @@ export async function handleDescribeRooms(req: Request): Promise<Response> {
     );
   }
 
+  const parsedGrounding = grounding === undefined
+    ? undefined
+    : GroundingSelectionSchema.safeParse(grounding);
+  if (parsedGrounding !== undefined && !parsedGrounding.success) {
+    return new Response(JSON.stringify({ error: "Invalid note source selection" }), {
+      status: 400, headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const providerName = provider ?? "gemini";
   const aiProvider = getProvider(providerName);
   const modelName = resolveModel(providerName, model);
   const apiKey = getApiKey(providerName);
-  const messages = buildNarratorMessages(
-    rooms,
-    allRooms ?? rooms,
-    corridors ?? [],
-    config,
-    { prompt: sourcePrompt, history: conversationHistory },
-  );
-
   const stream = operationStream(req, async (controller, signal) => {
     const encoder = new TextEncoder();
     let fullText = "";
 
     try {
+      const grounded = campaignId == null
+        ? undefined
+        : await retrieveGrounding(
+          appDb(), campaignId, parsedGrounding?.data,
+          sourcePrompt ?? conversationHistory?.filter((message) => message.role === "user").map((message) => message.content).join("\n\n") ?? "",
+          notesEmbedder, signal,
+        );
+      if (grounded !== undefined)
+        controller.enqueue(encoder.encode(sseEvent("grounding", grounded.provenance)));
+      const messages = buildNarratorMessages(
+        rooms,
+        allRooms ?? rooms,
+        corridors ?? [],
+        config,
+        { prompt: sourcePrompt, history: conversationHistory, campaignEvidence: grounded?.promptText },
+      );
       const generator = aiProvider.streamComplete(apiKey, {
         signal,
         messages,
@@ -183,7 +207,12 @@ export async function handleDescribeRooms(req: Request): Promise<Response> {
             continue;
           }
           seen.add(Number(roomId));
-          descriptions.push(valid.data);
+          descriptions.push({
+            roomId: valid.data.roomId,
+            description: grounded === undefined
+              ? valid.data.description
+              : { ...valid.data.description, grounding: grounded.provenance },
+          });
         }
       }
       const missingRoomIds = [...requested].filter((id) => !seen.has(id));
@@ -192,9 +221,10 @@ export async function handleDescribeRooms(req: Request): Promise<Response> {
         encoder.encode(
           sseEvent("complete", {
             descriptions,
-            missingRoomIds,
-            invalidRoomIds,
-            usage: result?.usage,
+          missingRoomIds,
+          invalidRoomIds,
+          grounding: grounded?.provenance,
+          usage: result?.usage,
             model: result?.model ?? modelName,
           }),
         ),
@@ -245,6 +275,7 @@ export async function handleDescribeRoom(
     chatId,
     sourcePrompt,
     conversationHistory,
+    grounding,
   } = body as DescribeRoomBody;
 
   if (!room || !config) {
@@ -261,23 +292,40 @@ export async function handleDescribeRoom(
     );
   }
 
+  const parsedGrounding = grounding === undefined
+    ? undefined
+    : GroundingSelectionSchema.safeParse(grounding);
+  if (parsedGrounding !== undefined && !parsedGrounding.success) {
+    return new Response(JSON.stringify({ error: "Invalid note source selection" }), {
+      status: 400, headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const providerName = provider ?? "gemini";
   const aiProvider = getProvider(providerName);
   const modelName = resolveModel(providerName, model);
   const apiKey = getApiKey(providerName);
-  const messages = buildNarratorMessages(
-    [room],
-    allRooms ?? [room],
-    corridors ?? [],
-    config,
-    { prompt: sourcePrompt, history: conversationHistory },
-  );
-
   const stream = operationStream(req, async (controller, signal) => {
     const encoder = new TextEncoder();
     let fullText = "";
 
     try {
+      const grounded = campaignId == null
+        ? undefined
+        : await retrieveGrounding(
+          appDb(), campaignId, parsedGrounding?.data,
+          sourcePrompt ?? conversationHistory?.filter((message) => message.role === "user").map((message) => message.content).join("\n\n") ?? "",
+          notesEmbedder, signal,
+        );
+      if (grounded !== undefined)
+        controller.enqueue(encoder.encode(sseEvent("grounding", grounded.provenance)));
+      const messages = buildNarratorMessages(
+        [room],
+        allRooms ?? [room],
+        corridors ?? [],
+        config,
+        { prompt: sourcePrompt, history: conversationHistory, campaignEvidence: grounded?.promptText },
+      );
       const generator = aiProvider.streamComplete(apiKey, {
         signal,
         messages,
@@ -350,8 +398,14 @@ export async function handleDescribeRoom(
           sseEvent("complete", {
             description:
               valid.success && valid.data.roomId === Number(roomId)
-                ? valid.data
+                ? {
+                    roomId: valid.data.roomId,
+                    description: grounded === undefined
+                      ? valid.data.description
+                      : { ...valid.data.description, grounding: grounded.provenance },
+                  }
                 : null,
+            grounding: grounded?.provenance,
             usage: result?.usage,
             model: result?.model ?? modelName,
           }),

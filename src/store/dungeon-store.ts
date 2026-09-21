@@ -9,6 +9,7 @@ import type {
   DungeonDescription,
 } from "../engine/types.ts";
 import type { Blueprint, BlueprintProblem } from "../ai/blueprint.ts";
+import type { GroundingSelection } from "../ai/grounding-types.ts";
 import { blueprintFromDungeon } from "../engine/refine-ops.ts";
 import { renderDungeonDataUrl } from "../export/png-export.ts";
 import { useUIStore } from "./ui-store.ts";
@@ -58,6 +59,8 @@ interface DungeonState {
   /** The floor plan driving the layout, when the Architect designed one. */
   blueprint: Blueprint | null;
   proposedBlueprint: Blueprint | null;
+  /** Explicit note sources for Architect/Narrator calls; null means all notes. */
+  groundingSelection: GroundingSelection | null;
   blueprintProblems: BlueprintProblem[];
   /** Pending refinement, awaiting the user's accept or discard. */
   refinement: Refinement | null;
@@ -113,6 +116,9 @@ interface DungeonState {
 
   setBlueprint: (blueprint: Blueprint | null) => void;
   setProposedBlueprint: (blueprint: Blueprint | null) => void;
+  /** Edit a plan locally; it becomes saved only when the user generates it. */
+  editBlueprint: (updater: (blueprint: Blueprint) => Blueprint) => void;
+  setGroundingSelection: (selection: GroundingSelection | null) => void;
   /** Send the plan (and a render of the map) for critique. Applies nothing. */
   refineLayout: (instruction?: string) => Promise<void>;
   /** Adopt the pending refinement and rebuild the map from it. */
@@ -122,6 +128,7 @@ interface DungeonState {
   generateBlueprint: (
     prompt: string,
     operation?: DungeonOperation,
+    selection?: GroundingSelection | null,
   ) => Promise<Blueprint | null>;
   /** Returns a forked dungeon when the described original had to be preserved. */
   generateDungeonFromConfig: () => Promise<DungeonRecord | null>;
@@ -284,6 +291,7 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
   dungeon: null,
   blueprint: null,
   proposedBlueprint: null,
+  groundingSelection: null,
   blueprintProblems: [],
   refinement: null,
   roomDescriptions: new Map<number, RoomDescription>(),
@@ -314,6 +322,7 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       dungeon: null,
       blueprint: null,
       proposedBlueprint: null,
+      groundingSelection: null,
       refinement: null,
       blueprintProblems: [],
       roomDescriptions: new Map(),
@@ -338,6 +347,12 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
         dungeon: record.geometry,
         blueprint: record.blueprint,
         proposedBlueprint: null,
+        groundingSelection: record.blueprint?.grounding === undefined
+          ? null
+          : {
+              documentIds: record.blueprint.grounding.documentIds ?? undefined,
+              query: record.blueprint.grounding.query,
+            },
         dungeonDescription: record.overview,
         roomDescriptions: new Map(record.roomNotes),
         missingRoomIds: [],
@@ -368,6 +383,7 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       dungeon: null,
       blueprint: null,
       proposedBlueprint: null,
+      groundingSelection: null,
       blueprintProblems: [],
       refinement: null,
       dungeonDescription: null,
@@ -444,6 +460,20 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
     set({ proposedBlueprint, blueprintProblems: [] });
   },
 
+  editBlueprint: (updater) => {
+    const current = get().proposedBlueprint ?? get().blueprint;
+    if (current === null) return;
+    const editable: Blueprint = {
+      ...current,
+      nodes: current.nodes.map((node) => ({ ...node })),
+      edges: current.edges.map((edge) => ({ ...edge })),
+    };
+    const next = updater(editable);
+    set({ proposedBlueprint: next, blueprintProblems: [] });
+  },
+
+  setGroundingSelection: (groundingSelection) => set({ groundingSelection }),
+
   /*
    * Ask the Architect for the floor plan, not the geometry.
    *
@@ -452,9 +482,10 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
    * connect - and never for a coordinate. Placement stays with the code that was
    * always good at it.
    */
-  generateBlueprint: async (prompt, sharedOperation) => {
+  generateBlueprint: async (prompt, sharedOperation, selection) => {
     const candidateConfig = get().proposedConfig ?? get().config;
     if (candidateConfig === null) return null;
+    if (selection !== undefined) set({ groundingSelection: selection });
     const operation = sharedOperation ?? beginDungeonOperation();
     set({ isGeneratingBlueprint: true, error: null, blueprintProblems: [] });
     try {
@@ -462,7 +493,7 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
       let blueprint: Blueprint | null = null;
       for await (const parsed of events(
         "/api/generate-blueprint",
-        { prompt, config: candidateConfig, ...ctx },
+        { prompt, config: candidateConfig, ...ctx, grounding: selection ?? ctx.grounding },
         operation,
       )) {
         if (parsed.blueprint) {
@@ -615,6 +646,12 @@ export const useDungeonStore = create<DungeonState>()((set, get) => ({
         blueprint: record.blueprint,
         proposedConfig: null,
         proposedBlueprint: null,
+        groundingSelection: record.blueprint?.grounding === undefined
+          ? null
+          : {
+              documentIds: record.blueprint.grounding.documentIds ?? undefined,
+              query: record.blueprint.grounding.query,
+            },
         dungeonDescription: record.overview,
         roomDescriptions: new Map(record.roomNotes),
         error: null,
@@ -959,6 +996,7 @@ function aiRequestContext(dungeonId: number | null, campaignId: number | null) {
       role: m.role,
       content: m.content,
     })),
+    grounding: useDungeonStore.getState().groundingSelection ?? undefined,
   };
 }
 

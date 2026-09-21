@@ -8,6 +8,7 @@ import {
 } from "../../store/content-drafts.ts";
 import type { DungeonDescription } from "../../engine/types.ts";
 import { Button } from "../shared/Button.tsx";
+import { GroundingSources } from "../shared/GroundingSources.tsx";
 
 export function DungeonPanel() {
   const dungeon = useDungeonStore((s) => s.dungeon);
@@ -171,6 +172,7 @@ export function DungeonPanel() {
               </ul>
             </div>
           )}
+          <GroundingSources grounding={d.grounding} label="Sources for this overview" />
         </>
       )}
     </div>

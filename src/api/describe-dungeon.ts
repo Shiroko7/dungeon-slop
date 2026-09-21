@@ -10,6 +10,10 @@ import { buildDungeonNarratorMessages } from "../ai/prompts/narrator.ts";
 import type { Room, Corridor, DungeonDescription } from "../engine/types.ts";
 import type { AIMessage } from "../ai/types.ts";
 import type { DungeonConfig } from "../ai/schema.ts";
+import { appDb } from "../db/context.ts";
+import { notesEmbedder } from "../notes/context.ts";
+import { GroundingSelectionSchema, retrieveGrounding } from "../ai/grounding.ts";
+import type { GroundingSelection } from "../ai/grounding-types.ts";
 
 interface DescribeDungeonBody {
   rooms: Room[];
@@ -25,6 +29,7 @@ interface DescribeDungeonBody {
   campaignId?: number;
   dungeonId?: number;
   chatId?: number;
+  grounding?: GroundingSelection;
 }
 
 function sseEvent(event: string, data: unknown): string {
@@ -56,6 +61,7 @@ export async function handleDescribeDungeon(req: Request): Promise<Response> {
     chatId,
     sourcePrompt,
     conversationHistory,
+    grounding,
   } = body as DescribeDungeonBody;
 
   if (!Array.isArray(rooms) || !Array.isArray(corridors) || !config) {
@@ -67,20 +73,38 @@ export async function handleDescribeDungeon(req: Request): Promise<Response> {
     );
   }
 
+  const parsedGrounding = grounding === undefined
+    ? undefined
+    : GroundingSelectionSchema.safeParse(grounding);
+  if (parsedGrounding !== undefined && !parsedGrounding.success) {
+    return new Response(JSON.stringify({ error: "Invalid note source selection" }), {
+      status: 400, headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const providerName = provider ?? "gemini";
   const aiProvider = getProvider(providerName);
   const modelName = resolveModel(providerName, model);
   const apiKey = getApiKey(providerName);
-  const messages = buildDungeonNarratorMessages(rooms, corridors, config, {
-    prompt: sourcePrompt,
-    history: conversationHistory,
-  });
-
   const stream = operationStream(req, async (controller, signal) => {
     const encoder = new TextEncoder();
     let fullText = "";
 
     try {
+      const grounded = campaignId == null
+        ? undefined
+        : await retrieveGrounding(
+          appDb(), campaignId, parsedGrounding?.data,
+          sourcePrompt ?? conversationHistory?.filter((message) => message.role === "user").map((message) => message.content).join("\n\n") ?? "",
+          notesEmbedder, signal,
+        );
+      if (grounded !== undefined)
+        controller.enqueue(encoder.encode(sseEvent("grounding", grounded.provenance)));
+      const messages = buildDungeonNarratorMessages(rooms, corridors, config, {
+        prompt: sourcePrompt,
+        history: conversationHistory,
+        campaignEvidence: grounded?.promptText,
+      });
       const generator = aiProvider.streamComplete(apiKey, {
         signal,
         messages,
@@ -133,11 +157,13 @@ export async function handleDescribeDungeon(req: Request): Promise<Response> {
       const description = parsed as DungeonDescription;
       if (!description.corridorFeatures) description.corridorFeatures = [];
       if (!description.wanderingMonsters) description.wanderingMonsters = [];
+      if (grounded !== undefined) description.grounding = grounded.provenance;
 
       controller.enqueue(
         encoder.encode(
           sseEvent("complete", {
             description,
+            grounding: grounded?.provenance,
             usage: result?.usage,
             model: result?.model ?? modelName,
           }),

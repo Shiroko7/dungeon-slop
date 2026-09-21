@@ -122,6 +122,7 @@ function cloneBlueprint(blueprint: Blueprint): Blueprint {
     name: blueprint.name,
     nodes: blueprint.nodes.map((n) => ({ ...n })),
     edges: blueprint.edges.map((e) => ({ ...e })),
+    grounding: blueprint.grounding,
   };
 }
 
@@ -144,6 +145,10 @@ export function applyRefineOps(
     next.edges.findIndex(
       (e) => (e.from === a && e.to === b) || (e.from === b && e.to === a),
     );
+  const lockedEdge = (a: string, b: string): boolean => {
+    const index = edgeIndex(a, b);
+    return index >= 0 && next.edges[index]?.locked === true;
+  };
 
   for (const op of ops) {
     const refuse = (note: string) => results.push({ op, applied: false, note });
@@ -153,6 +158,7 @@ export function applyRefineOps(
       case "move_room": {
         const node = find(op.key);
         if (node === undefined) { refuse("No such room"); break; }
+        if (node.locked) { refuse("Room is locked by the user"); break; }
         if (node.role === "entrance") { refuse("The entrance is always tier 0"); break; }
         node.tier = Math.max(1, node.tier + op.tierDelta);
         accept();
@@ -161,6 +167,7 @@ export function applyRefineOps(
       case "resize_room": {
         const node = find(op.key);
         if (node === undefined) { refuse("No such room"); break; }
+        if (node.locked) { refuse("Room is locked by the user"); break; }
         node.size = op.size;
         accept();
         break;
@@ -168,9 +175,14 @@ export function applyRefineOps(
       case "set_role": {
         const node = find(op.key);
         if (node === undefined) { refuse("No such room"); break; }
+        if (node.locked) { refuse("Room is locked by the user"); break; }
         // Entrance and boss are unique, so taking the role means giving up the
         // old holder's - otherwise normalize would silently demote one of them.
         if (op.role === "entrance" || op.role === "boss") {
+          if (next.nodes.some((other) => other.key !== node.key && other.role === op.role && other.locked)) {
+            refuse(`The existing ${op.role} is locked by the user`);
+            break;
+          }
           for (const other of next.nodes) {
             if (other.key !== node.key && other.role === op.role) other.role = "chamber";
           }
@@ -182,6 +194,7 @@ export function applyRefineOps(
       case "rename_room": {
         const node = find(op.key);
         if (node === undefined) { refuse("No such room"); break; }
+        if (node.locked) { refuse("Room is locked by the user"); break; }
         node.name = op.name;
         accept();
         break;
@@ -189,6 +202,7 @@ export function applyRefineOps(
       case "set_wing": {
         const node = find(op.key);
         if (node === undefined) { refuse("No such room"); break; }
+        if (node.locked) { refuse("Room is locked by the user"); break; }
         if (op.wing === null) delete node.wing;
         else node.wing = op.wing;
         accept();
@@ -205,6 +219,7 @@ export function applyRefineOps(
       case "disconnect": {
         const index = edgeIndex(op.from, op.to);
         if (index === -1) { refuse("Not connected"); break; }
+        if (lockedEdge(op.from, op.to)) { refuse("Connection is locked by the user"); break; }
         // Refuse anything that would strand a room. Connectivity is the one
         // property a re-solve cannot repair for us.
         const trial = next.edges.filter((_, i) => i !== index);
@@ -216,6 +231,7 @@ export function applyRefineOps(
       case "remove_room": {
         const node = find(op.key);
         if (node === undefined) { refuse("No such room"); break; }
+        if (node.locked) { refuse("Room is locked by the user"); break; }
         if (node.role === "entrance" || node.role === "boss") {
           refuse(`Refusing to remove the ${node.role}`);
           break;
@@ -223,6 +239,10 @@ export function applyRefineOps(
         if (next.nodes.length <= 3) { refuse("Too few rooms left to remove another"); break; }
         const keptNodes = next.nodes.filter((n) => n.key !== op.key);
         const keptEdges = next.edges.filter((e) => e.from !== op.key && e.to !== op.key);
+        if (next.edges.some((e) => (e.from === op.key || e.to === op.key) && e.locked)) {
+          refuse("A connection for this room is locked by the user");
+          break;
+        }
         if (!allReachable(keptNodes, keptEdges)) { refuse("Would strand part of the map"); break; }
         next.nodes = keptNodes;
         next.edges = keptEdges;

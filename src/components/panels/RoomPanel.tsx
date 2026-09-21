@@ -4,6 +4,7 @@ import { useDungeonStore } from "../../store/dungeon-store.ts";
 import { api } from "../../store/api.ts";
 import { useUIStore } from "../../store/ui-store.ts";
 import { Button } from "../shared/Button.tsx";
+import { GroundingSources } from "../shared/GroundingSources.tsx";
 import { useConfirm } from "../shared/ConfirmDialog.tsx";
 import type { Room, RoomDescription, RoomEntry } from "../../engine/types.ts";
 import {
@@ -326,6 +327,7 @@ function RoomDetail({
           {desc.empty && (
             <p className="room-detail-empty-tag">This room is empty.</p>
           )}
+          <GroundingSources grounding={desc.grounding} label="Sources for this room" />
         </>
       ) : (
         <p className="room-detail-empty">No description yet. Use Describe All or edit manually.</p>

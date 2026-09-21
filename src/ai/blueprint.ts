@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RoomShapeEnum } from "./schema.ts";
+import type { GroundingProvenance } from "./grounding-types.ts";
 
 /**
  * A dungeon's floor plan as a graph, before any geometry exists.
@@ -39,6 +40,8 @@ export const BlueprintNodeSchema = z.object({
   shape: RoomShapeEnum.optional(),
   /** What happens here - handed to the narrator so prose matches the plan. */
   notes: z.string().max(400).optional(),
+  /** User-protected requirement; AI refinement must leave this node intact. */
+  locked: z.boolean().optional(),
 });
 
 export const BlueprintEdgeSchema = z.object({
@@ -48,17 +51,41 @@ export const BlueprintEdgeSchema = z.object({
   gating: z.string().max(200).optional(),
   /** Prefer this door type on the connection. */
   door: z.string().max(40).optional(),
+  /** User-protected requirement; AI refinement must leave this edge intact. */
+  locked: z.boolean().optional(),
+});
+
+export const GroundingCitationSchema = z.object({
+  campaignId: z.number().int().positive(),
+  documentId: z.number().int().positive(),
+  revision: z.number().int().positive(),
+  chunkId: z.number().int().positive(),
+  filename: z.string().max(300),
+  headingPath: z.string().max(500),
+  snippet: z.string().max(1200),
+  startOffset: z.number().int().nonnegative(),
+  endOffset: z.number().int().nonnegative(),
+});
+
+export const GroundingProvenanceSchema = z.object({
+  query: z.string().max(1000),
+  documentIds: z.array(z.number().int().positive()).max(50).nullable(),
+  citations: z.array(GroundingCitationSchema).max(12),
+  warnings: z.array(z.string().max(500)).max(12),
+  status: z.enum(["ready", "empty-query", "empty-index", "no-sources", "unavailable", "no-matches"]),
+  retrievedAt: z.number().int().nonnegative(),
 });
 
 export const BlueprintSchema = z.object({
   name: z.string().max(120).optional(),
   nodes: z.array(BlueprintNodeSchema).min(2).max(40),
   edges: z.array(BlueprintEdgeSchema),
+  grounding: GroundingProvenanceSchema.optional(),
 });
 
 export type BlueprintNode = z.infer<typeof BlueprintNodeSchema>;
 export type BlueprintEdge = z.infer<typeof BlueprintEdgeSchema>;
-export type Blueprint = z.infer<typeof BlueprintSchema>;
+export type Blueprint = z.infer<typeof BlueprintSchema> & { grounding?: GroundingProvenance };
 
 export interface BlueprintProblem {
   severity: "error" | "repaired";
@@ -173,5 +200,5 @@ export function normalizeBlueprint(input: Blueprint): {
     problems.push({ severity: "repaired", message: `"${node.name}" was unreachable; joined to "${anchor.name}"` });
   }
 
-  return { blueprint: { name: input.name, nodes, edges }, problems };
+  return { blueprint: { name: input.name, nodes, edges, grounding: input.grounding }, problems };
 }

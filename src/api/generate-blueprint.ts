@@ -9,6 +9,10 @@ import { buildBlueprintMessages } from "../ai/prompts/blueprint.ts";
 import type { DungeonConfig } from "../ai/schema.ts";
 import type { AIMessage, ThinkingLevel } from "../ai/types.ts";
 import { recordUsage } from "../db/usage.ts";
+import { appDb } from "../db/context.ts";
+import { notesEmbedder } from "../notes/context.ts";
+import { retrieveGrounding, GroundingSelectionSchema } from "../ai/grounding.ts";
+import type { GroundingSelection } from "../ai/grounding-types.ts";
 
 interface GenerateBlueprintBody {
   prompt: string;
@@ -22,6 +26,7 @@ interface GenerateBlueprintBody {
   dungeonId?: number;
   chatId?: number;
   conversationHistory?: AIMessage[];
+  grounding?: GroundingSelection;
 }
 
 function sseEvent(event: string, data: unknown): string {
@@ -58,6 +63,7 @@ export async function handleGenerateBlueprint(req: Request): Promise<Response> {
     dungeonId,
     chatId,
     conversationHistory,
+    grounding,
   } = body as GenerateBlueprintBody;
 
   if (typeof prompt !== "string") {
@@ -70,21 +76,37 @@ export async function handleGenerateBlueprint(req: Request): Promise<Response> {
     );
   }
 
+  const parsedGrounding = grounding === undefined
+    ? undefined
+    : GroundingSelectionSchema.safeParse(grounding);
+  if (parsedGrounding !== undefined && !parsedGrounding.success) {
+    return new Response(JSON.stringify({ error: "Invalid note source selection" }), {
+      status: 400, headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const providerName = provider ?? "gemini";
   const aiProvider = getProvider(providerName);
   const modelName = resolveModel(providerName, model);
   const apiKey = getApiKey(providerName);
-  const messages = buildBlueprintMessages({
-    prompt,
-    config: config ?? null,
-    history: conversationHistory,
-  });
-
   const stream = operationStream(req, async (controller, signal) => {
     const encoder = new TextEncoder();
     let fullText = "";
 
     try {
+      const grounded = campaignId == null
+        ? undefined
+        : await retrieveGrounding(
+          appDb(), campaignId, parsedGrounding?.data, prompt, notesEmbedder, signal,
+        );
+      if (grounded !== undefined)
+        controller.enqueue(encoder.encode(sseEvent("grounding", grounded.provenance)));
+      const messages = buildBlueprintMessages({
+        prompt,
+        config: config ?? null,
+        history: conversationHistory,
+        campaignEvidence: grounded?.promptText,
+      });
       const generator = aiProvider.streamComplete(apiKey, {
         signal,
         messages,
@@ -151,7 +173,10 @@ export async function handleGenerateBlueprint(req: Request): Promise<Response> {
         return;
       }
 
-      const { blueprint, problems } = normalizeBlueprint(validation.data);
+      const { blueprint: normalized, problems } = normalizeBlueprint(validation.data);
+      const blueprint = grounded === undefined
+        ? normalized
+        : { ...normalized, grounding: grounded.provenance };
 
       controller.enqueue(
         encoder.encode(

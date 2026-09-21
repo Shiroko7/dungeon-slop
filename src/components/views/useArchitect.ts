@@ -8,6 +8,7 @@ import { events } from "../../store/operation.ts";
 import { useChatStore } from "../../store/chat-store.ts";
 import { useAIStore } from "../../store/ai-store.ts";
 import { DungeonConfigSchema } from "../../ai/schema.ts";
+import type { GroundingSelection } from "../../ai/grounding-types.ts";
 
 /**
  * The Architect turn: describe a map, get a config back.
@@ -16,14 +17,14 @@ import { DungeonConfigSchema } from "../../ai/schema.ts";
  * to the dungeon's own chat thread rather than held in component state. The
  * config it produces goes to the dungeon store, which autosaves it.
  */
-export function useArchitect(): (text: string) => Promise<void> {
+export function useArchitect(): (text: string, selection?: GroundingSelection | null) => Promise<void> {
   return useCallback(runArchitect, []);
 }
 
 /** Exported separately so the complete config → blueprint lifecycle is testable
  * without a mounted React tree or live model credentials.
  */
-export async function runArchitect(text: string): Promise<void> {
+export async function runArchitect(text: string, selection?: GroundingSelection | null): Promise<void> {
   const {
     temperature,
     provider,
@@ -41,6 +42,7 @@ export async function runArchitect(text: string): Promise<void> {
     dungeonState.isGeneratingBlueprint
   )
     return;
+  if (selection !== undefined) dungeonState.setGroundingSelection(selection);
   const operation = beginDungeonOperation();
   dungeonState.setIsGeneratingConfig(true);
   dungeonState.setConfigRawText("");
@@ -95,7 +97,7 @@ export async function runArchitect(text: string): Promise<void> {
     if (gotConfig && useBlueprint) {
       const plan = await useDungeonStore
         .getState()
-        .generateBlueprint(text, operation);
+        .generateBlueprint(text, operation, selection);
       operation.assert();
       if (plan)
         await useChatStore

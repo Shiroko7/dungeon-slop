@@ -39,6 +39,9 @@ WHAT TO LOOK FOR, in priority order:
 RULES:
 - Be surgical. Five well-aimed ops beat twenty. If the plan is already good, return few ops or none — an empty "ops" array is a valid and useful answer.
 - Never move or remove the entrance or the boss. You may re-role or rename them.
+- Nodes or edges marked "locked: true" are user requirements. Never rename, move,
+  remove, re-role, disconnect, or otherwise alter them; refuse to propose an op
+  that would change one.
 - Never propose an op that would strand a room with no connections.
 - Refer to rooms by their "key", exactly as given to you. A key you invent is a dropped op.
 - If an image is provided, use it: judge the SHAPE of the map, the long empty runs, the clustering, the rooms that sit oddly alone. Say what you see.
@@ -83,6 +86,7 @@ export function buildRefineMessages(request: RefineRequest): AIMessage[] {
       name: request.blueprint.name,
       nodes: request.blueprint.nodes,
       edges: request.blueprint.edges,
+      grounding: request.blueprint.grounding,
     },
   };
 
