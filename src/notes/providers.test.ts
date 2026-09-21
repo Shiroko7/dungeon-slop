@@ -232,6 +232,39 @@ describe("OpenAI-compatible summarizer", () => {
 });
 
 describe("OpenAI-compatible embedder", () => {
+  for (const malformed of ["duplicate index", "wrong model", "non-numeric vector"]) {
+    test(`rejects ${malformed} before it can be attached to chunks`, async () => {
+      await withStubServer(
+        () => jsonResponse({
+          model: malformed === "wrong model" ? "unexpected-model" : "m",
+          data: [
+            { index: 0, embedding: malformed === "non-numeric vector" ? ["1", 2] : [1, 2] },
+            { index: malformed === "duplicate index" ? 0 : 1, embedding: [3, 4] },
+          ],
+        }),
+        async (baseUrl) => {
+          const embedder = createOpenAICompatEmbedder({ baseUrl, apiKey: "k", model: "m" });
+          await expect(embedder.embed(["a", "b"], "document")).rejects.toThrow();
+        },
+      );
+    });
+  }
+
+  test("cancelling rate-limit backoff prevents another provider request", async () => {
+    const abort = new AbortController();
+    await withStubServer(
+      () => {
+        setTimeout(() => abort.abort(), 30);
+        return new Response("rate limited", { status: 429 });
+      },
+      async (baseUrl, seen) => {
+        const embedder = createOpenAICompatEmbedder({ baseUrl, apiKey: "k", model: "m" });
+        await expect(embedder.embed(["a"], "document", abort.signal)).rejects.toThrow();
+        expect(seen).toHaveLength(1);
+      },
+    );
+  });
+
   test("returns vectors in input order even when the reply is shuffled", async () => {
     await withStubServer(
       (_req, body) => {

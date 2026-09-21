@@ -46,7 +46,8 @@ export function assertEmbeddingModel(db: Database, model: string, dimensions: nu
   if (existing !== stamp) {
     throw new Error(
       `Embedding model mismatch: index was built with "${existing}" but "${stamp}" was supplied. ` +
-        `Re-index from scratch (delete the database) or switch back.`,
+        `Switch back to the indexed model, then use Retry or Reindex on the affected note. ` +
+        `Your existing notes and campaign data have been preserved.`,
     );
   }
 }
@@ -76,6 +77,16 @@ interface DocumentRow {
   entities: string;
   tokens: number;
   chunk_count: number;
+  active_revision: number;
+  latest_revision: number;
+  source_available: number;
+  retry_source_available: number;
+  active_index_status: string | null;
+  index_status: string | null;
+  index_error: string | null;
+  summary_status: string | null;
+  summary_error: string | null;
+  embedding_model: string | null;
 }
 
 function toDocument(row: DocumentRow): NoteDocument {
@@ -95,13 +106,30 @@ function toDocument(row: DocumentRow): NoteDocument {
     entities,
     tokens: row.tokens,
     chunkCount: row.chunk_count,
+    activeRevision: row.active_revision,
+    latestRevision: row.latest_revision,
+    sourceAvailable: Boolean(row.source_available),
+    retrySourceAvailable: Boolean(row.retry_source_available),
+    activeIndexStatus: row.active_index_status ?? 'unindexed',
+    indexStatus: row.index_status ?? 'legacy',
+    indexError: row.index_error,
+    summaryStatus: row.summary_status ?? (row.active_revision === 0 ? 'pending' : row.summary ? 'ready' : 'source-required'),
+    summaryError: row.summary_error,
+    embeddingModel: row.embedding_model,
   };
 }
 
 const DOC_SELECT = `
   SELECT d.id, d.campaign_id, d.filename, d.uploaded_at, d.summary, d.entities, d.tokens,
+         d.active_revision, d.latest_revision,
+         a.source_text IS NOT NULL AS source_available,
+         r.source_text IS NOT NULL AS retry_source_available,
+         a.index_status AS active_index_status,
+         r.index_status, r.index_error, a.summary_status, a.summary_error, a.embedding_model,
          (SELECT COUNT(*) FROM chunks c WHERE c.doc_id = d.id) AS chunk_count
   FROM documents d
+  LEFT JOIN note_revisions a ON a.doc_id = d.id AND a.revision = d.active_revision
+  LEFT JOIN note_revisions r ON r.doc_id = d.id AND r.revision = d.latest_revision
 `;
 
 export function listDocuments(db: Database, campaignId: number): NoteDocument[] {
@@ -144,10 +172,9 @@ export function documentCampaignId(db: Database, id: number): number | null {
 }
 
 /**
- * Replace a document and all of its derived rows in one transaction. Re-uploading
- * a file must never leave half the old chunks behind — stale chunks are
- * unfalsifiable at query time, since a wrong answer sourced from them looks
- * exactly like a right one.
+ * Legacy fixture helper for low-level database tests. Production uploads must
+ * use ingestDocument, which stages vectors before replacing the active index
+ * and preserves document identity and retryable source revisions.
  */
 export function replaceDocument(
   db: Database,

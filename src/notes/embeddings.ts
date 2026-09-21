@@ -1,4 +1,5 @@
 import type { EmbeddingProvider } from "./types.ts";
+import { setTimeout as delay } from "node:timers/promises";
 
 const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
 // voyage-4-lite: $0.02 per 1M tokens with the first 200M free, so a 25M-token
@@ -12,6 +13,7 @@ const MAX_BATCH_CHARS = 320_000;
 const MAX_ATTEMPTS = 4;
 
 interface VoyageResponse {
+  model?: string;
   data: Array<{ embedding: number[]; index: number }>;
   usage?: { total_tokens?: number };
 }
@@ -20,9 +22,9 @@ function isRetryable(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
-async function backoff(attempt: number): Promise<void> {
+async function backoff(attempt: number, signal?: AbortSignal): Promise<void> {
   const ms = Math.min(500 * 2 ** attempt, 8000) + Math.random() * 250;
-  await new Promise((resolve) => setTimeout(resolve, ms));
+  await delay(ms, undefined, { signal });
 }
 
 /**
@@ -55,6 +57,7 @@ async function requestBatch(
   model: string,
   texts: string[],
   kind: "document" | "query",
+  signal?: AbortSignal,
 ): Promise<Float32Array[]> {
   let lastError = "";
 
@@ -66,11 +69,12 @@ async function requestBatch(
         authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({ input: texts, model, input_type: kind }),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.any([AbortSignal.timeout(120_000), ...(signal ? [signal] : [])]),
     });
 
     if (response.ok) {
       const data = (await response.json()) as VoyageResponse;
+      if (data.model !== undefined && data.model !== model) throw new Error("Embedding model mismatch in Voyage response");
       // Index order is documented but not guaranteed by the wire format; sort
       // rather than trust it, because a silent shuffle here maps every chunk to
       // the wrong vector and nothing downstream can detect it.
@@ -80,12 +84,18 @@ async function requestBatch(
           `Voyage returned ${sorted.length} embeddings for ${texts.length} inputs`,
         );
       }
-      return sorted.map((row) => Float32Array.from(row.embedding));
+      return sorted.map((row, index) => {
+        if (row.index !== index || !Array.isArray(row.embedding) ||
+            row.embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+          throw new Error("Invalid Voyage embedding response");
+        }
+        return Float32Array.from(row.embedding);
+      });
     }
 
     lastError = `${response.status} ${await response.text()}`;
     if (!isRetryable(response.status)) break;
-    await backoff(attempt);
+    await backoff(attempt, signal);
   }
 
   throw new Error(`Voyage embeddings failed: ${lastError}`);
@@ -101,11 +111,11 @@ export function createVoyageProvider(
 
   return {
     model,
-    async embed(texts, kind) {
+    async embed(texts, kind, signal) {
       if (texts.length === 0) return [];
       const out: Float32Array[] = [];
       for (const group of batch(texts)) {
-        out.push(...(await requestBatch(apiKey, model, group, kind)));
+        out.push(...(await requestBatch(apiKey, model, group, kind, signal)));
       }
       return out;
     },

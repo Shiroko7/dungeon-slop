@@ -1,5 +1,5 @@
 /**
- * The application schema, v3.
+ * The application schema, v7.
  *
  * Everything the app owns lives in one SQLite file, because the ownership tree
  * only means anything if a delete can cascade through it. A campaign that lived
@@ -11,7 +11,7 @@
  * the v1 `documents` table, which predates campaigns — live in `migrate.ts` and
  * run first.
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -38,14 +38,36 @@ CREATE TABLE IF NOT EXISTS documents (
   summary      TEXT    NOT NULL DEFAULT '',
   entities     TEXT    NOT NULL DEFAULT '[]',
   tokens       INTEGER NOT NULL DEFAULT 0,
+  active_revision INTEGER NOT NULL DEFAULT 0,
+  latest_revision INTEGER NOT NULL DEFAULT 0,
   UNIQUE (campaign_id, filename)
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_campaign ON documents (campaign_id, filename);
 
+CREATE TABLE IF NOT EXISTS note_revisions (
+  doc_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL,
+  source_text TEXT,
+  content_hash TEXT NOT NULL,
+  chunker_version TEXT NOT NULL,
+  embedding_model TEXT NOT NULL,
+  dimensions INTEGER,
+  index_status TEXT NOT NULL DEFAULT 'pending',
+  index_error TEXT,
+  summary_status TEXT NOT NULL DEFAULT 'pending',
+  summary_error TEXT,
+  summary_model TEXT,
+  worker_token TEXT,
+  lease_until INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (doc_id, revision)
+);
+
 CREATE TABLE IF NOT EXISTS chunks (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   doc_id       INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  source_revision INTEGER NOT NULL DEFAULT 1,
   ordinal      INTEGER NOT NULL,
   heading_path TEXT    NOT NULL,
   text         TEXT    NOT NULL,
