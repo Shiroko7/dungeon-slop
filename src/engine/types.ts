@@ -1,4 +1,5 @@
 import type { DungeonConfig } from "../ai/schema.ts";
+import type { GroundingProvenance } from "../ai/grounding-types.ts";
 
 export enum CellType {
   Empty = 0,
@@ -42,10 +43,14 @@ export type RoomRole =
 export interface RoomPlan {
   key: string;
   name: string;
+  /** User-protected room requirement from the editable blueprint. */
+  locked?: boolean;
   wing?: string;
   notes?: string;
   /** What bars the way in or out, taken from the blueprint's edges. */
   gating?: string[];
+  /** Door preferences requested by blueprint edges; geometry may report them as unmet. */
+  doorPreferences?: string[];
 }
 
 export interface Cell {
@@ -134,6 +139,8 @@ export interface RoomDescription {
   tricks?: string[];
   notes?: string;
   empty?: boolean;
+  /** Note passages used for this generated description, if any. */
+  grounding?: GroundingProvenance;
 }
 
 export interface CorridorFeature {
@@ -151,6 +158,8 @@ export interface DungeonDescription {
   illumination?: string;
   corridorFeatures: CorridorFeature[];
   wanderingMonsters: string[];
+  /** Note passages used for this generated overview, if any. */
+  grounding?: GroundingProvenance;
 }
 
 /**
@@ -166,6 +175,17 @@ export interface LayoutReport {
   junctionsAdded: number;
   longestCorridorCells: number;
   hasLoop: boolean;
+  /** Blueprint requirements checked against the delivered geometry. */
+  constraints?: {
+    requestedConnections: number;
+    deliveredConnections: number;
+    unmetConnections: Array<{ from: string; to: string }>;
+    reachableRooms: number;
+    unreachableRooms: string[];
+    requestedEntrances: number;
+    deliveredEntrances: number;
+    unmetRequirements: string[];
+  };
 }
 
 export interface Dungeon {

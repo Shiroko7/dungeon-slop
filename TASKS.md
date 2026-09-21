@@ -3,9 +3,9 @@
 Updated 2026-09-21. [ROADMAP.md](ROADMAP.md) is the authoritative plan, including
 scope, dependencies, and acceptance criteria. This file tracks execution. The
 September review and roadmap are complete. M1.1–M1.4 are merged. M2.1 is implemented
-merged with automated checks passing; M2.2 is implemented on its review branch;
+merged with automated checks passing; M2.3 is implemented on its review branch;
 live browser verification is pending. See the
-[M2.2 review guide](docs/M2.2-REVIEW.md) for limits and remaining checks.
+[M2.3 review guide](docs/M2.3-REVIEW.md) for limits and remaining checks.
 
 ## Milestone 1 in four PRs
 
@@ -49,30 +49,31 @@ changes together and update the roadmap if evidence changes scope.
 
 | Milestone | Proposed packages | Status |
 | --- | --- | --- |
-| M2 — Complete the defining workflow | M2.1 reader/retrieval/evaluation; M2.2 Loremaster; M2.3 grounded Architect/Narrator | M2.1 IMPLEMENTED — draft review; M2.2/M2.3 PLANNED |
+| M2 — Complete the defining workflow | M2.1 reader/retrieval/evaluation; M2.2 Loremaster; M2.3 grounded Architect/Narrator | M2.1 + M2.2 MERGED; M2.3 IMPLEMENTED — draft review |
 | M3 — Make it comfortable at the table | M3.1 exports; M3.2 creation/workspace/accessibility; M3.3 library/recovery; M3.4 providers/usage | PLANNED |
 | M4 — Expand after measuring | Themes; encounter/session preparation; connected levels; measured Rust/WASM acceleration | CANDIDATES |
 
-M2.1 is merged. M2.2 is the current draft review unit; M2.3 remains planned.
+M2.1 and M2.2 are merged. M2.3 is the current draft review unit.
 
 Known export disclosure/format defects are tracked under M3.1 and remain unresolved.
 Treat current exports as GM material and inspect before sharing. A focused urgent
 correction can move earlier without pulling in the entire export redesign.
 
-### Current review unit: M2.2
+### Current review unit: M2.3
 
-Reader deep links bind campaign/document/revision/chunk identity. Campaign-scoped
-keyword, semantic and hybrid search share source filtering, rank fusion, overlap
-deduplication, neighbor expansion, context budgets, provider validation and cancellation.
-M2.2 adds the bounded Loremaster loop over those diagnostics, with streaming,
-revision-bound citations, cancellation, and persisted tool provenance.
+The Architect and Narrator reuse campaign-scoped keyword/semantic/hybrid retrieval
+with explicit source selection, bounded context, provider validation, and
+cancellation. Generation evidence is labelled as untrusted facts, stored as
+revision-bound provenance, and linked back to the source reader. Blueprint reports
+check built connections and entrances; gate and door preferences are surfaced as
+advisory when the renderer cannot enforce them.
 
-Automated acceptance covers the bounded Loremaster loop, campaign-owned read-only
-tools, SSE streaming, cancellation, persisted citations/tool provenance, and the
-chat UI. The fixed 36-query synthetic evaluation still reports 84.8% keyword and
-100% semantic/hybrid hit@5 with zero cross-campaign hits. No paid provider calls or
-live-database mutations. Interactive browser checks remain unverified, so this
-package is not marked complete. See [the M2.2 review guide](docs/M2.2-REVIEW.md).
+Automated acceptance covers source selection, bounded grounding, SSE evidence
+events, blueprint/narrator prompt wiring, persisted citations, room-ID validation,
+constraint reporting, and the existing save/fork contracts. The full suite reports
+1415 passing tests across 36 files; no paid provider calls or live-database
+mutations. Interactive browser checks remain unverified, so this package is not
+marked complete. See [the M2.3 review guide](docs/M2.3-REVIEW.md).
 
 ## The model
 
@@ -94,7 +95,7 @@ Ownership rules, enforced by foreign keys:
 2. Deleting a campaign deletes its notes, chunks, embeddings, dungeons, room
    notes, chats and messages — one cascade, no orphans.
 3. Notes are campaign-scoped, never dungeon-scoped. A dungeon never owns them;
-   having the Architect/Narrator read them is planned in M2.
+   the Architect and Narrator read bounded, explicitly selected campaign evidence.
 4. A dungeon owns its rooms. Rooms are never shared.
 5. Chats own nothing. Deleting one loses the transcript and nothing else.
 
@@ -146,7 +147,7 @@ PR-level acceptance requirements are in [the roadmap](ROADMAP.md#verification-an
 | Area | Current state | Follow-up |
 | --- | --- | --- |
 | BSP/cellular generation, corridors, shapes, features | Implemented; committed edits reconcile derived geometry | Interactive M1.3 review |
-| AI config, blueprint, narration, refinement | Implemented, not connected to campaign retrieval | Ownership/authorship in M1; grounding in M2 |
+| AI config, blueprint, narration, refinement | Implemented with bounded campaign grounding, provenance, and map constraint checks | Interactive M2.3 review; gate/door enforcement remains advisory |
 | Campaign/dungeon/chat ownership and migrations | Implemented; current schema version is 7 | Preserve ownership through M2 |
 | SQLite persistence and autosave | Revision-checked queue, conflicts and bounded recovery | Interactive M1.1 review |
 | Reroll-as-fork and manual descriptions | Authored checkpoints, persistent drafts and idempotent forks | Interactive M1.2 review |
@@ -157,7 +158,7 @@ PR-level acceptance requirements are in [the roadmap](ROADMAP.md#verification-an
 | PNG/PDF/VTT and description exports | Implemented; correctness/audience/size gaps | M3.1 |
 | Hybrid retrieval (former 7E) | Campaign search, revision-bound reader, diagnostic API and synthetic evaluation implemented | M2.1 merged; interactive review pending |
 | Loremaster answers (former 7F) | Bounded campaign tools, streamed answers, revision-bound citations, cancellation, and persisted provenance | M2.2 draft review |
-| Architect reads notes (former 7G) | Not implemented | M2.3 |
+| Architect/Narrator reads notes (former 7G) | Source selection, bounded evidence, revision-bound provenance, and constraint reporting implemented | M2.3 draft review |
 | Usage ledger | Generation tokens tracked; cloud rates unset; notes calls missing | M3.4 |
 | Rust/WASM | PRNG/types/grid ported; production generator remains TypeScript | M4.4 after profiling |
 

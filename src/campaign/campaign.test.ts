@@ -255,6 +255,28 @@ describe("dungeons", () => {
     expect(getDungeon(db, d.id)?.name).toBe("Crypt");
   });
 
+  test("grounding provenance survives dungeon and room reloads", () => {
+    const db = fresh();
+    const c = createCampaign(db, { name: "Ashen Vale" });
+    const grounding = {
+      query: "salt gate",
+      documentIds: [1],
+      citations: [{ campaignId: c.id, documentId: 1, revision: 2, chunkId: 3, filename: "crypt.md", headingPath: "Gate", snippet: "Below Vess", startOffset: 0, endOffset: 10 }],
+      warnings: [],
+      status: "ready",
+      retrievedAt: 1,
+    } as const;
+    const d = createDungeon(db, c.id, {
+      name: "Crypt",
+      blueprint: { nodes: [], edges: [], grounding } as never,
+      overview: { history: "The crypt.", corridorFeatures: [], wanderingMonsters: [], grounding } as never,
+    });
+    const saved = updateDungeon(db, d.id, { roomNotes: [[0, { name: "Gate", features: "Wet stone.", grounding } as never]] });
+    expect(saved?.blueprint?.grounding?.citations[0]?.revision).toBe(2);
+    expect(saved?.overview?.grounding?.query).toBe("salt gate");
+    expect(getDungeon(db, d.id)?.roomNotes[0]?.[1].grounding?.citations[0]?.filename).toBe("crypt.md");
+  });
+
   test("saving a dungeon floats its campaign to the top of the picker", () => {
     const db = fresh();
     const a = createCampaign(db, { name: "First" });

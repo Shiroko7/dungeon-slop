@@ -6,15 +6,16 @@ plans rooms and connections and a narrator that writes room descriptions.
 Runs locally on Bun + SQLite. The name undersells it; the test suite does not.
 
 ```
-1407 pass · 0 fail · 34 files
+1415 pass · 0 fail · 36 files
 ```
 
-M2.2 automated verification: 2026-09-21. Rust has 28 baseline passing tests (not
+M2.3 automated verification: 2026-09-21. Rust has 28 baseline passing tests (not
 rerun; this milestone changes no Rust code). Coverage includes save recovery, authored
 revisions, edit reconciliation, recoverable ingestion, source reading, retrieval,
-bounded Loremaster research, streaming cancellation, citations, and persisted
-tool provenance. Live browser verification remains pending; export corrections
-remain on the roadmap. See [the M2.2 review guide](docs/M2.2-REVIEW.md).
+bounded Loremaster research, grounded Architect/Narrator generation, constraint
+checks, streaming cancellation, citations, and persisted provenance. Live browser
+verification remains pending; export corrections remain on the roadmap. See [the
+M2.3 review guide](docs/M2.3-REVIEW.md).
 
 See [ROADMAP.md](ROADMAP.md) for the four milestones and detailed PR scopes, and
 [TASKS.md](TASKS.md) for execution status. Milestone 1 is grouped into four PRs:
@@ -34,10 +35,12 @@ adjacency — the procedural engine lays that out as real geometry, and the narr
 writes rooms consistent with the map and those sources.
 
 **Today:** prompt/chat-driven planning, procedural layout, narration, editing,
-note ingestion, source reading, campaign search, and bounded, citation-backed
-Loremaster answers exist. Retrieval is not yet connected to the Architect or
-Narrator; that is the remaining M2.3 package after protecting existing work and
-making the Loremaster workflow inspectable.
+note ingestion, source reading, campaign search, bounded, citation-backed
+Loremaster answers, note-grounded Architect/Narrator generation, and an editable
+room/connection plan exist. The
+Architect and Narrator show revision-bound source passages and the built map reports
+which blueprint connections and entrances were delivered. Refresh after note edits
+is explicit; existing artifacts are not silently rewritten.
 
 ## Everything lives in one tree
 
@@ -219,9 +222,10 @@ schema is SQL and the migrations are explicit.
 
 - **Single level per dungeon.** Stairs render as features but do not connect to
   a second floor. Multi-level is a data model change, not a rendering one.
-- Loremaster answers are bounded to campaign-owned, read-only note tools and
-  persist revision-bound citations. Architect/Narrator retrieval grounding is
-  still planned for M2.3, and model quality is not a substitute for reviewing
+- Loremaster answers and Architect/Narrator generation are bounded to
+  campaign-owned, read-only note retrieval and persist revision-bound citations.
+  Gate and door preferences in a blueprint are currently advisory and are called
+  out by the constraint report; model quality is not a substitute for reviewing
   source snippets.
 - Recovery is bounded, not a backup system. Review the M1 operating notes and keep
   backups of your SQLite database. Live-browser acceptance checks are still pending.

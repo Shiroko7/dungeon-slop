@@ -2,7 +2,9 @@ import { useCallback, useState } from "react";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
 import { Button } from "../shared/Button.tsx";
 import type { RoomRole } from "../../engine/types.ts";
+import type { BlueprintEdge, BlueprintNode } from "../../ai/blueprint.ts";
 import { roomName } from "../../engine/room-name.ts";
+import { linkProps, paths } from "../../router/router.ts";
 
 const ROLE_LABELS: Record<string, string> = {
   entrance: "Entrance",
@@ -43,9 +45,45 @@ export function LayoutPanel() {
   const refineLayout = useDungeonStore((s) => s.refineLayout);
   const acceptRefinement = useDungeonStore((s) => s.acceptRefinement);
   const discardRefinement = useDungeonStore((s) => s.discardRefinement);
+  const editBlueprint = useDungeonStore((s) => s.editBlueprint);
 
   const [instruction, setInstruction] = useState("");
   const [showPlan, setShowPlan] = useState(false);
+  const [editPlan, setEditPlan] = useState(false);
+  const [connectFrom, setConnectFrom] = useState("");
+  const [connectTo, setConnectTo] = useState("");
+
+  const updateNode = useCallback((key: string, patch: Partial<BlueprintNode>) => {
+    editBlueprint((plan) => ({
+      ...plan,
+      nodes: plan.nodes.map((node) => node.key === key ? { ...node, ...patch } : node),
+    }));
+  }, [editBlueprint]);
+
+  const updateEdge = useCallback((index: number, patch: Partial<BlueprintEdge>) => {
+    editBlueprint((plan) => ({
+      ...plan,
+      edges: plan.edges.map((edge, edgeIndex) => edgeIndex === index ? { ...edge, ...patch } : edge),
+    }));
+  }, [editBlueprint]);
+
+  const addConnection = useCallback(() => {
+    if (connectFrom === "" || connectTo === "" || connectFrom === connectTo || blueprint === null) return;
+    if (blueprint.edges.some((edge) =>
+      (edge.from === connectFrom && edge.to === connectTo) ||
+      (edge.from === connectTo && edge.to === connectFrom))) return;
+    editBlueprint((plan) => ({
+      ...plan,
+      edges: [...plan.edges, { from: connectFrom, to: connectTo }],
+    }));
+    setConnectFrom("");
+    setConnectTo("");
+  }, [blueprint, connectFrom, connectTo, editBlueprint]);
+
+  const removeConnection = useCallback((index: number) => {
+    if (blueprint?.edges[index]?.locked) return;
+    editBlueprint((plan) => ({ ...plan, edges: plan.edges.filter((_, edgeIndex) => edgeIndex !== index) }));
+  }, [blueprint, editBlueprint]);
 
   const handleRefine = useCallback(() => {
     if (isRefining) return;
@@ -57,11 +95,11 @@ export function LayoutPanel() {
     void acceptRefinement();
   }, [acceptRefinement]);
 
-  if (dungeon === null) return null;
+  if (dungeon === null && blueprint === null) return null;
 
-  const report = dungeon.report;
-  const editStatus = dungeon.editStatus;
-  const planned = dungeon.rooms.filter((r) => r.role !== "junction");
+  const report = dungeon?.report;
+  const editStatus = dungeon?.editStatus;
+  const planned = dungeon?.rooms.filter((r) => r.role !== "junction") ?? [];
   const byTier = new Map<number, typeof planned>();
   for (const room of planned) {
     const tier = room.tier ?? 0;
@@ -132,6 +170,148 @@ export function LayoutPanel() {
         </p>
       )}
 
+      {report?.constraints !== undefined && (
+        <div className="layout-constraints">
+          <strong>Constraint check</strong>
+          <span>
+            {report.constraints.deliveredConnections}/{report.constraints.requestedConnections} planned connections delivered;
+            {report.constraints.deliveredEntrances}/{report.constraints.requestedEntrances} entrances delivered.
+          </span>
+          <span>
+            {report.constraints.reachableRooms}/{report.requestedRooms} planned rooms reachable.
+          </span>
+          {report.constraints.unmetConnections.length > 0 && (
+            <span className="layout-stat-warn">
+              Unmet connections: {report.constraints.unmetConnections.map((edge) => `${edge.from} → ${edge.to}`).join(", ")}
+            </span>
+          )}
+          {report.constraints.unreachableRooms.length > 0 && (
+            <span className="layout-stat-warn">
+              Unreachable rooms: {report.constraints.unreachableRooms.join(", ")}
+            </span>
+          )}
+          {report.constraints.unmetRequirements.length > 0 && (
+            <details>
+              <summary>Advisory requirements ({report.constraints.unmetRequirements.length})</summary>
+              <ul>{report.constraints.unmetRequirements.map((item, index) => <li key={index}>{item}</li>)}</ul>
+            </details>
+          )}
+        </div>
+      )}
+
+      {blueprint?.grounding !== undefined && (
+        <details className="layout-grounding">
+          <summary>Campaign sources ({blueprint.grounding.citations.length})</summary>
+          <p>Retrieved for “{blueprint.grounding.query}”. Refresh is explicit; this plan is not silently rewritten when notes change.</p>
+          {blueprint.grounding.warnings.length > 0 && <p className="layout-notice">{blueprint.grounding.warnings.join(" ")}</p>}
+          <ul>
+            {blueprint.grounding.citations.map((citation) => (
+              <li key={`${citation.documentId}-${citation.revision}-${citation.chunkId}`}>
+                <a {...linkProps(paths.note(citation.campaignId, citation.documentId, citation.revision, citation.chunkId))}>{citation.filename}</a>
+                <span>{citation.headingPath || "Document"}</span>
+                <small>{citation.snippet}</small>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {blueprint !== null && (
+        <div className="layout-plan-editor">
+          <button className="layout-disclosure" onClick={() => setEditPlan((value) => !value)}>
+            {editPlan ? "Close plan editor" : "Edit room and connection plan"}
+          </button>
+          {editPlan && (
+            <div className="layout-plan-editor-body">
+              <p className="layout-refine-hint">
+                Room keys are stable identities. Lock a room or connection to make it a
+                requirement that AI refinement cannot change. Edits stay proposed until Generate.
+              </p>
+              <ul className="layout-plan-nodes">
+                {blueprint.nodes.map((node) => (
+                  <li key={node.key} className="layout-plan-node">
+                    <code>{node.key}</code>
+                    <input
+                      type="text"
+                      aria-label={`Name for ${node.key}`}
+                      value={node.name}
+                      disabled={node.locked === true}
+                      onChange={(event) => updateNode(node.key, { name: event.target.value })}
+                    />
+                    <select
+                      aria-label={`Role for ${node.key}`}
+                      value={node.role}
+                      disabled={node.locked === true}
+                      onChange={(event) => updateNode(node.key, { role: event.target.value as BlueprintNode["role"] })}
+                    >
+                      {(["entrance", "hub", "gauntlet", "chokepoint", "boss", "vault", "chamber"] as const).map((role) => (
+                        <option key={role} value={role}>{role}</option>
+                      ))}
+                    </select>
+                    <label className="layout-plan-lock">
+                      <input
+                        type="checkbox"
+                        checked={node.locked === true}
+                        onChange={(event) => updateNode(node.key, { locked: event.target.checked })}
+                      />
+                      lock
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <div className="layout-plan-connections">
+                <strong>Connections</strong>
+                <ul>
+                  {blueprint.edges.map((edge, index) => (
+                    <li key={`${edge.from}-${edge.to}-${index}`}>
+                      <span>{edge.from} → {edge.to}</span>
+                      <input
+                        aria-label={`Gate for ${edge.from} to ${edge.to}`}
+                        placeholder="gate (optional)"
+                        value={edge.gating ?? ""}
+                        disabled={edge.locked === true}
+                        onChange={(event) => updateEdge(index, event.target.value.trim() === "" ? { gating: undefined } : { gating: event.target.value })}
+                      />
+                      <input
+                        aria-label={`Door for ${edge.from} to ${edge.to}`}
+                        placeholder="door (optional)"
+                        value={edge.door ?? ""}
+                        disabled={edge.locked === true}
+                        onChange={(event) => updateEdge(index, event.target.value.trim() === "" ? { door: undefined } : { door: event.target.value })}
+                      />
+                      <label className="layout-plan-lock">
+                        <input
+                          type="checkbox"
+                          checked={edge.locked === true}
+                          onChange={(event) => updateEdge(index, { locked: event.target.checked })}
+                        />
+                        lock
+                      </label>
+                      <button type="button" className="layout-plan-remove" disabled={edge.locked === true} onClick={() => removeConnection(index)}>
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="layout-plan-add-connection">
+                  <select aria-label="Connection source" value={connectFrom} onChange={(event) => setConnectFrom(event.target.value)}>
+                    <option value="">From room…</option>
+                    {blueprint.nodes.map((node) => <option key={node.key} value={node.key}>{node.name}</option>)}
+                  </select>
+                  <select aria-label="Connection destination" value={connectTo} onChange={(event) => setConnectTo(event.target.value)}>
+                    <option value="">To room…</option>
+                    {blueprint.nodes.map((node) => <option key={node.key} value={node.key}>{node.name}</option>)}
+                  </select>
+                  <Button variant="secondary" size="sm" onClick={addConnection} disabled={connectFrom === "" || connectTo === "" || connectFrom === connectTo}>
+                    Add connection
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {problems.length > 0 && (
         <ul className="layout-problems">
           {problems.map((p, i) => (
@@ -140,11 +320,13 @@ export function LayoutPanel() {
         </ul>
       )}
 
-      <button className="layout-disclosure" onClick={() => setShowPlan((v) => !v)}>
-        {showPlan ? "Hide floor plan" : `Show floor plan (${planned.length} rooms)`}
-      </button>
+      {dungeon !== null && (
+        <button className="layout-disclosure" onClick={() => setShowPlan((v) => !v)}>
+          {showPlan ? "Hide floor plan" : `Show floor plan (${planned.length} rooms)`}
+        </button>
+      )}
 
-      {showPlan && (
+      {dungeon !== null && showPlan && (
         <ol className="layout-tiers">
           {[...byTier.entries()]
             .sort((a, b) => a[0] - b[0])
@@ -166,6 +348,12 @@ export function LayoutPanel() {
                           gated
                         </span>
                       )}
+                      {room.plan?.doorPreferences !== undefined && room.plan.doorPreferences.length > 0 && (
+                        <span className="layout-gating" title={room.plan.doorPreferences.join("; ")}>
+                          door preference
+                        </span>
+                      )}
+                      {room.plan?.locked === true && <span className="layout-gating">locked</span>}
                     </li>
                   ))}
                 </ul>
@@ -174,7 +362,7 @@ export function LayoutPanel() {
         </ol>
       )}
 
-      <div className="layout-refine">
+      {dungeon !== null && <div className="layout-refine">
         {refinement === null ? (
           <>
             <input
@@ -245,7 +433,7 @@ export function LayoutPanel() {
             </p>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

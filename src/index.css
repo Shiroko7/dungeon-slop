@@ -2046,6 +2046,20 @@ input:focus, select:focus, textarea:focus {
 .chat-tool-provenance ul { margin: 8px 0 0 16px; display: grid; gap: 4px; }
 .chat-cancel-btn { align-self: flex-start; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); color: var(--text); cursor: pointer; }
 .chat-cancel-btn:hover, .chat-cancel-btn:focus-visible { border-color: var(--accent); }
+.architect-grounding { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 6px; font-size: 12px; }
+.architect-grounding-head { display: flex; justify-content: space-between; gap: 8px; color: var(--text-2); }
+.architect-grounding-query { display: grid; gap: 4px; color: var(--text-2); }
+.architect-grounding-query input { min-width: 0; padding: 5px 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
+.architect-grounding-all, .architect-grounding-source { display: flex; align-items: center; gap: 6px; color: var(--text-2); }
+.architect-grounding-source small { margin-left: auto; color: var(--text-3); }
+.architect-grounding-empty { color: var(--text-3); }
+.layout-constraints, .layout-grounding { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 5px; font-size: 12px; color: var(--text-2); }
+.layout-constraints strong, .layout-grounding summary { color: var(--text); }
+.layout-constraints details summary, .layout-grounding summary { cursor: pointer; }
+.layout-constraints ul, .layout-grounding ul { margin: 4px 0 0 16px; display: grid; gap: 5px; }
+.layout-grounding li { display: grid; gap: 2px; }
+.layout-grounding li a { color: var(--accent); }
+.layout-grounding li small { color: var(--text-2); line-height: 1.35; }
 
 .notes-progress {
   margin-top: 8px;
@@ -4081,6 +4095,93 @@ a.home-stat:hover .home-stat-n {
   gap: 8px;
   padding-top: 4px;
   border-top: 1px solid var(--border);
+}
+
+.layout-plan-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layout-plan-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.layout-plan-nodes,
+.layout-plan-connections ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.layout-plan-node,
+.layout-plan-connections li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+
+.layout-plan-node code {
+  flex: 0 0 88px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.layout-plan-node input[type="text"],
+.layout-plan-connections input,
+.layout-plan-node select,
+.layout-plan-add-connection select {
+  min-width: 0;
+  flex: 1 1 100px;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.layout-plan-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+
+.layout-plan-remove {
+  padding: 3px 5px;
+  color: var(--text-3);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.layout-plan-remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.layout-plan-add-connection {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 4px;
 }
 
 .layout-refine-input {

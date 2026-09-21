@@ -9,6 +9,9 @@ import { ConfigReadout } from "../input/ConfigReadout.tsx";
 import { useArchitect } from "../views/useArchitect.ts";
 import { linkProps, navigate, paths } from "../../router/router.ts";
 import { countLine, useConfirm } from "../shared/ConfirmDialog.tsx";
+import { api } from "../../store/api.ts";
+import type { NoteDocument } from "../../notes/types.ts";
+import type { GroundingSelection } from "../../ai/grounding-types.ts";
 
 type Tab = "rooms" | "architect";
 
@@ -61,9 +64,48 @@ function ArchitectTab({ campaignId, dungeonId }: { campaignId: number; dungeonId
   const config = useDungeonStore((s) => s.proposedConfig ?? s.config);
   const clarification = useDungeonStore((s) => s.clarificationQuestion);
   const refreshContents = useCampaignStore((s) => s.refreshContents);
+  const storedGrounding = useDungeonStore((s) => s.groundingSelection);
 
   const [configOpen, setConfigOpen] = useState(false);
+  const [documents, setDocuments] = useState<NoteDocument[]>([]);
+  const [sourceIds, setSourceIds] = useState<number[] | null>(null);
+  const [sourceQuery, setSourceQuery] = useState("");
   const ask = useArchitect();
+
+  useEffect(() => {
+    let active = true;
+    void api.notes.list(campaignId).then((items) => {
+      if (active) setDocuments(items);
+    }).catch(() => {
+      if (active) setDocuments([]);
+    });
+    return () => { active = false; };
+  }, [campaignId]);
+
+  useEffect(() => {
+    if (storedGrounding === null) {
+      setSourceIds(null);
+      setSourceQuery("");
+      return;
+    }
+    setSourceIds(storedGrounding.documentIds ?? null);
+    setSourceQuery(storedGrounding.query ?? "");
+  }, [storedGrounding]);
+
+  const selection = (): GroundingSelection => ({
+    ...(sourceIds === null ? {} : { documentIds: sourceIds }),
+    ...(sourceQuery.trim() === "" ? {} : { query: sourceQuery.trim() }),
+  });
+  const toggleSource = (documentId: number): void => {
+    setSourceIds((current) => {
+      if (current === null) {
+        return documents.filter((doc) => doc.activeIndexStatus === "indexed" && doc.id !== documentId).map((doc) => doc.id);
+      }
+      return current.includes(documentId)
+        ? current.filter((id) => id !== documentId)
+        : [...current, documentId];
+    });
+  };
 
   const isArchitectThread = chat !== null && chat.dungeonId === dungeonId;
 
@@ -75,7 +117,7 @@ function ArchitectTab({ campaignId, dungeonId }: { campaignId: number; dungeonId
       emptyTitle="Describe your dungeon"
       emptyHint="A flooded crypt under a salt marsh, twelve rooms, one secret vault."
       placeholder={clarification !== null ? "Type your reply…" : "Describe your dungeon… (Ctrl+Enter)"}
-      onSend={(text) => void ask(text).then(() => refreshContents(campaignId))}
+      onSend={(text) => void ask(text, selection()).then(() => refreshContents(campaignId))}
       onEdit={submitEdit}
       disabled={!isArchitectThread}
       footer={
@@ -90,9 +132,43 @@ function ArchitectTab({ campaignId, dungeonId }: { campaignId: number; dungeonId
         ) : null
       }
       hint={
-        clarification !== null && !isGeneratingConfig ? (
-          <div className="chat-clarification-hint">Reply below to answer ↓</div>
-        ) : null
+        <>
+          {clarification !== null && !isGeneratingConfig && (
+            <div className="chat-clarification-hint">Reply below to answer ↓</div>
+          )}
+          <div className="architect-grounding">
+          <div className="architect-grounding-head">
+            <strong>Campaign notes</strong>
+            <span>{sourceIds === null ? "All indexed notes" : `${sourceIds.length} selected`}</span>
+          </div>
+          <label className="architect-grounding-query">
+            Retrieval focus (optional)
+            <input
+              value={sourceQuery}
+              onChange={(event) => setSourceQuery(event.target.value)}
+              placeholder="e.g. Vess crypt landmarks and factions"
+              maxLength={1000}
+            />
+          </label>
+          <label className="architect-grounding-all">
+            <input type="checkbox" checked={sourceIds === null} onChange={() => setSourceIds(null)} />
+            Search all indexed notes
+          </label>
+          {documents.map((document) => (
+            <label key={document.id} className="architect-grounding-source">
+              <input
+                type="checkbox"
+                checked={sourceIds === null || sourceIds.includes(document.id)}
+                disabled={document.activeIndexStatus !== "indexed"}
+                onChange={() => toggleSource(document.id)}
+              />
+              <span>{document.filename}</span>
+              <small>{document.activeIndexStatus}</small>
+            </label>
+          ))}
+          {documents.length === 0 && <span className="architect-grounding-empty">No notes indexed yet.</span>}
+          </div>
+        </>
       }
     />
   );

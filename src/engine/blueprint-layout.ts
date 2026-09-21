@@ -284,12 +284,21 @@ export function layoutBlueprint(
   separateIntegers(placed, width, height);
 
   const gatingByKey = new Map<string, string[]>();
+  const doorByKey = new Map<string, string[]>();
   for (const edge of blueprint.edges) {
-    if (edge.gating === undefined || edge.gating.trim().length === 0) continue;
-    for (const key of [edge.from, edge.to]) {
-      const list = gatingByKey.get(key);
-      if (list === undefined) gatingByKey.set(key, [edge.gating]);
-      else list.push(edge.gating);
+    if (edge.gating !== undefined && edge.gating.trim().length > 0) {
+      for (const key of [edge.from, edge.to]) {
+        const list = gatingByKey.get(key);
+        if (list === undefined) gatingByKey.set(key, [edge.gating]);
+        else list.push(edge.gating);
+      }
+    }
+    if (edge.door !== undefined && edge.door.trim() !== "") {
+      for (const key of [edge.from, edge.to]) {
+        const list = doorByKey.get(key);
+        if (list === undefined) doorByKey.set(key, [edge.door]);
+        else if (!list.includes(edge.door)) list.push(edge.door);
+      }
     }
   }
 
@@ -320,9 +329,11 @@ export function layoutBlueprint(
       plan: {
         key: p.node.key,
         name: p.node.name,
+        locked: p.node.locked,
         wing: p.node.wing,
         notes: p.node.notes,
         gating: gatingByKey.get(p.node.key),
+        doorPreferences: doorByKey.get(p.node.key),
       },
     };
   });

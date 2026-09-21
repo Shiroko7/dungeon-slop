@@ -13,6 +13,70 @@ import { assignRoles, enforceCorridorBudget, hasLoop } from "./layout-rules.ts";
 import { layoutBlueprint } from "./blueprint-layout.ts";
 import type { Blueprint } from "../ai/blueprint.ts";
 
+function blueprintConstraints(blueprint: Blueprint, rooms: Room[]) {
+  const byKey = new Map(rooms.map((room) => [room.plan?.key, room]));
+  const unmetConnections: Array<{ from: string; to: string }> = [];
+  let deliveredConnections = 0;
+  const builtPath = (fromId: number, toId: number): boolean => {
+    const seen = new Set<number>([fromId]);
+    const queue = [fromId];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      for (const next of rooms.find((room) => room.id === id)?.connections ?? []) {
+        if (next === toId) return true;
+        if (seen.has(next)) continue;
+        const target = rooms.find((room) => room.id === next);
+        // A long planned edge may be split by engine junction chambers. Do not
+        // cross another planned room, or an unrelated route could satisfy it.
+        if (target?.plan?.key !== undefined) continue;
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+    return false;
+  };
+  for (const edge of blueprint.edges) {
+    const from = byKey.get(edge.from);
+    const to = byKey.get(edge.to);
+    if (from !== undefined && to !== undefined && builtPath(from.id, to.id)) {
+      deliveredConnections++;
+    } else {
+      unmetConnections.push({ from: edge.from, to: edge.to });
+    }
+  }
+  const planRooms = rooms.filter((room) => room.plan?.key !== undefined);
+  const reached = new Set<number>();
+  const queue = planRooms.filter((room) => room.role === "entrance").map((room) => room.id);
+  for (const id of queue) reached.add(id);
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    for (const next of rooms.find((room) => room.id === id)?.connections ?? []) {
+      const target = rooms.find((room) => room.id === next);
+      if (target === undefined || reached.has(next)) continue;
+      reached.add(next);
+      queue.push(next);
+    }
+  }
+  const unreachableRooms = planRooms
+    .filter((room) => !reached.has(room.id))
+    .map((room) => room.plan!.key);
+  const unmetRequirements: string[] = [];
+  for (const edge of blueprint.edges) {
+    if (edge.gating?.trim()) unmetRequirements.push(`Gate "${edge.gating}" is advisory; no lock mechanic is enforced by geometry.`);
+    if (edge.door?.trim()) unmetRequirements.push(`Door preference "${edge.door}" is advisory; the renderer does not bind a door type to a specific edge.`);
+  }
+  return {
+    requestedConnections: blueprint.edges.length,
+    deliveredConnections,
+    unmetConnections,
+    reachableRooms: planRooms.filter((room) => reached.has(room.id)).length,
+    unreachableRooms,
+    requestedEntrances: blueprint.nodes.filter((node) => node.role === "entrance").length,
+    deliveredEntrances: rooms.filter((room) => room.role === "entrance").length,
+    unmetRequirements,
+  };
+}
+
 function carveRoomsIntoGrid(grid: Cell[][], rooms: Room[], rng: SeededRandom): void {
   for (const room of rooms) {
     const cells = carveShape(room.shape, room.x, room.y, room.width, room.height, rng);
@@ -200,6 +264,7 @@ export function generateFromBlueprint(blueprint: Blueprint, config: DungeonConfi
     junctionsAdded: budgeted.junctionsAdded,
     longestCorridorCells: allCorridors.reduce((m, c) => Math.max(m, c.path.length), 0),
     hasLoop: hasLoop(rooms),
+    constraints: blueprintConstraints(blueprint, rooms),
   };
 
   return dungeon;
