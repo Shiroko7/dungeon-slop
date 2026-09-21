@@ -45,6 +45,7 @@ import {
   handleLegacyImportStatus,
 } from "./legacy-import.ts";
 import { handleUsage } from "./usage.ts";
+import { handleReadNote, handleSearchNotes } from "./search-notes.ts";
 import { json, readJson, badRequest, serverError } from "./http.ts";
 import { checkOrigin } from "./origin.ts";
 import { validateAIRequest } from "./ownership.ts";
@@ -104,6 +105,16 @@ const routes: Route[] = [
   },
 
   // ─── notes, owned by a campaign ───────────────────────────────────────────
+  {
+    method: "POST",
+    pattern: /^\/api\/campaigns\/(\d+)\/notes\/search$/,
+    handle: (req, [id]) => handleSearchNotes(req, id!),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/campaigns\/(\d+)\/notes\/(\d+)\/revisions\/(\d+)$/,
+    handle: (req, [campaign, doc, revision]) => handleReadNote(req, campaign!, doc!, revision!),
+  },
   {
     method: "GET",
     pattern: /^\/api\/campaigns\/(\d+)\/notes$/,

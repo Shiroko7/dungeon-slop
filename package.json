@@ -9,7 +9,8 @@
     "start": "bun run src/server.ts",
     "build": "bun x --bun vite build",
     "preview": "bun x --bun vite preview",
-    "test": "bun test"
+    "test": "bun test",
+    "eval:retrieval": "bun run src/notes/eval/evaluate.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -44,6 +44,11 @@ describe("parseRoute", () => {
 });
 
 describe("path builders round-trip", () => {
+  test("document and passage addresses retain campaign, document and revision identity", () => {
+    expect(parseRoute(paths.note(3, 8, 2))).toEqual({ view: "note", campaignId: 3, documentId: 8, revision: 2, chunkId: null });
+    expect(parseRoute(paths.note(3, 8, 2, 45))).toEqual({ view: "note", campaignId: 3, documentId: 8, revision: 2, chunkId: 45 });
+    expect(campaignOf(parseRoute(paths.note(3, 8, 2, 45)))).toBe(3);
+  });
   test("every builder produces a path that parses back to itself", () => {
     expect(parseRoute(paths.picker())).toEqual({ view: "picker" });
     expect(parseRoute(paths.campaign(3))).toEqual({ view: "campaign", campaignId: 3 });

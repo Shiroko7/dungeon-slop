@@ -74,7 +74,7 @@ export function Rail({ route }: { route: Route }) {
               href={paths.notes(campaignId)}
               label="Notes"
               glyph="📓"
-              active={route.view === "notes"}
+              active={route.view === "notes" || route.view === "note"}
             />
             <RailLink
               href={paths.usage(campaignId)}

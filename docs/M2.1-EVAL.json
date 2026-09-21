@@ -1,0 +1,54 @@
+{
+  "dataset": "m21-v1",
+  "corpusSha256": "4e7054982bb3f7c1c700f3a507118ad029b5547ac4e398d0109d873bb4369d98",
+  "documents": 24,
+  "queries": 36,
+  "targetHitAt5": 0.9,
+  "parameters": {
+    "limit": 5,
+    "tokenBudget": 3000,
+    "neighbors": 0,
+    "candidateLimit": 60,
+    "rrfK": 60,
+    "maximumVectorChunks": 50000,
+    "embeddingModel": "m21-synthetic-v1"
+  },
+  "modes": {
+    "lexical": {
+      "answerableQueries": 33,
+      "hitAt5": 0.8484848484848485,
+      "allRelevantAt5": 0.8484848484848485,
+      "multiSourceAllAt5": 1,
+      "missingEmpty": 3,
+      "missingQueries": 3,
+      "leaks": 0,
+      "failures": [
+        "q22",
+        "q23",
+        "q24",
+        "q25",
+        "q26"
+      ]
+    },
+    "semantic": {
+      "answerableQueries": 33,
+      "hitAt5": 1,
+      "allRelevantAt5": 1,
+      "multiSourceAllAt5": 1,
+      "missingEmpty": 3,
+      "missingQueries": 3,
+      "leaks": 0,
+      "failures": []
+    },
+    "hybrid": {
+      "answerableQueries": 33,
+      "hitAt5": 1,
+      "allRelevantAt5": 1,
+      "multiSourceAllAt5": 1,
+      "missingEmpty": 3,
+      "missingQueries": 3,
+      "leaks": 0,
+      "failures": []
+    }
+  }
+}

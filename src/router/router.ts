@@ -12,6 +12,7 @@ export type Route =
   | { view: "picker" }
   | { view: "campaign"; campaignId: number }
   | { view: "notes"; campaignId: number }
+  | { view: "note"; campaignId: number; documentId: number; revision: number; chunkId: number | null }
   | { view: "usage"; campaignId: number }
   | { view: "chat"; campaignId: number; chatId: number }
   | {
@@ -23,6 +24,10 @@ export type Route =
   | { view: "unknown"; path: string };
 
 const PATTERNS: Array<[RegExp, (m: RegExpExecArray) => Route]> = [
+  [
+    /^\/c\/(\d+)\/notes\/(\d+)\/r\/(\d+)(?:\/chunk\/(\d+))?\/?$/,
+    (m) => ({ view: "note", campaignId: Number(m[1]), documentId: Number(m[2]), revision: Number(m[3]), chunkId: m[4] ? Number(m[4]) : null }),
+  ],
   [/^\/?$/, () => ({ view: "picker" })],
   [/^\/c\/(\d+)\/?$/, (m) => ({ view: "campaign", campaignId: Number(m[1]) })],
   [
@@ -74,6 +79,8 @@ export const paths = {
   picker: (): string => "/",
   campaign: (campaignId: number): string => `/c/${campaignId}`,
   notes: (campaignId: number): string => `/c/${campaignId}/notes`,
+  note: (campaignId: number, documentId: number, revision: number, chunkId?: number): string =>
+    `/c/${campaignId}/notes/${documentId}/r/${revision}${chunkId === undefined ? "" : `/chunk/${chunkId}`}`,
   usage: (campaignId: number): string => `/c/${campaignId}/usage`,
   chat: (campaignId: number, chatId: number): string =>
     `/c/${campaignId}/chat/${chatId}`,
