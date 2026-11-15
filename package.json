@@ -25,12 +25,15 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
-    "jspdf": "^2",
+    "jspdf": "^4.2.1",
     "polybooljs": "^1.2.2",
     "react": "^19",
     "react-dom": "^19",
     "roughjs": "^4.6.6",
-    "zod": "^3",
+    "zod": "^4.6.6",
     "zustand": "^5"
+  },
+  "engines": {
+    "node": ">=22.18.0"
   }
 }

@@ -1,8 +1,5 @@
-// The SDK's structured-output helper is built against zod v4, which ships as a
-// subpath of the zod 3.25 already in this project. Schemas used with
-// `zodOutputFormat` or `z.toJSONSchema` must come from here, not from the
-// classic `zod` import the rest of the codebase uses.
-import * as z from "zod/v4";
+// Use the same patched Zod 4 schemas as the SDK's structured-output helper.
+import * as z from "zod";
 import type { DocumentSummary } from "./types.ts";
 
 /**
