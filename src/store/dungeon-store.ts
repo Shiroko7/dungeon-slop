@@ -986,8 +986,9 @@ function aiRequestContext(dungeonId: number | null, campaignId: number | null) {
   return {
     temperature,
     provider,
-    model,
-    thinkingLevel,
+    // null means "provider default": leave the field out rather than send null.
+    model: model ?? undefined,
+    thinkingLevel: thinkingLevel ?? undefined,
     includeThoughts: captureReasoning,
     campaignId,
     dungeonId,

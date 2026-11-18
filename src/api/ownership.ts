@@ -17,9 +17,10 @@ const contextSchema = z
     expectedRevision: z.number().int().nonnegative().optional(),
     operationId: z.string().uuid().optional(),
     provider: z.enum(["gemini", "claude", "ollama"]).optional(),
-    model: z.string().optional(),
+    // null = "provider default", which is how the client store says "not set".
+    model: z.string().nullable().optional(),
     temperature: z.number().min(0).max(2).optional(),
-    thinkingLevel: z.enum(["minimal", "low", "medium", "high"]).optional(),
+    thinkingLevel: z.enum(["minimal", "low", "medium", "high"]).nullable().optional(),
     includeThoughts: z.boolean().optional(),
     conversationHistory: z
       .array(

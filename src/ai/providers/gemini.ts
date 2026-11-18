@@ -126,9 +126,9 @@ function convertMessages(messages: AIMessage[]): {
  */
 function resolveThinkingLevel(
   model: string,
-  requested: ThinkingLevel | undefined,
+  requested: ThinkingLevel | null | undefined,
 ): ThinkingLevel | undefined {
-  if (requested === undefined) return undefined;
+  if (requested == null) return undefined;
   const info = MODELS.find((m) => m.id === model);
   if (!info) return requested;
   return info.thinkingLevels.includes(requested) ? requested : undefined;
