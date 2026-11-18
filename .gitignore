@@ -47,3 +47,7 @@ notes.sqlite-wal
 
 # agent scratch notes - contain absolute local paths, and are not project docs
 .claude/agent-memory/
+
+# generated map art (bun run assets)
+/assets/library/
+__pycache__/

@@ -10,10 +10,12 @@
     "build": "bun x --bun vite build",
     "preview": "bun x --bun vite preview",
     "test": "bun test",
-    "eval:retrieval": "bun run src/notes/eval/evaluate.ts"
+    "eval:retrieval": "bun run src/notes/eval/evaluate.ts",
+    "assets": "bun run scripts/assets.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^5.1.4",
@@ -26,6 +28,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
     "jspdf": "^4.2.1",
+    "pngjs": "^7.0.0",
     "polybooljs": "^1.2.2",
     "react": "^19",
     "react-dom": "^19",

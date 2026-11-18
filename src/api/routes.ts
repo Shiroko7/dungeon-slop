@@ -50,6 +50,7 @@ import { handleReadNote, handleSearchNotes } from "./search-notes.ts";
 import { json, readJson, badRequest, serverError } from "./http.ts";
 import { checkOrigin } from "./origin.ts";
 import { validateAIRequest } from "./ownership.ts";
+import { handleAssetImage, handleAssetThumb, handleFavoriteAsset, handleListAssets } from "./assets.ts";
 
 /**
  * Routes are matched against a small table rather than a chain of `if`s, so the
@@ -303,6 +304,18 @@ export async function handleApiRoute(
       headers: { "Content-Type": "application/json" },
     });
   }
+
+  // Generated map art. Asset ids are slugs, not numbers, so these sit outside
+  // the numeric-id route table.
+  if (pathname === "/api/assets" && req.method === "GET") {
+    return handleListAssets(new URL(req.url));
+  }
+  const asset = /^\/api\/assets\/([^/]+)\.png$/.exec(pathname);
+  if (asset && req.method === "GET") return handleAssetImage(asset[1]!);
+  const thumb = /^\/api\/assets\/([^/]+)\/thumb\.png$/.exec(pathname);
+  if (thumb && req.method === "GET") return handleAssetThumb(thumb[1]!, new URL(req.url));
+  const favorite = /^\/api\/assets\/([^/]+)\/favorite$/.exec(pathname);
+  if (favorite && req.method === "POST") return handleFavoriteAsset(favorite[1]!, req);
 
   let pathMatched = false;
 
