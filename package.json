@@ -11,6 +11,7 @@
     "preview": "bun x --bun vite preview",
     "test": "bun test",
     "eval:retrieval": "bun run src/notes/eval/evaluate.ts",
+    "dungeon": "bun run scripts/dungeon.ts",
     "assets": "bun run scripts/assets.ts"
   },
   "devDependencies": {

@@ -48,6 +48,9 @@ notes.sqlite-wal
 # agent scratch notes - contain absolute local paths, and are not project docs
 .claude/agent-memory/
 
+# backups written by `bun run dungeon wipe`
+notes.sqlite.*.bak
+
 # generated map art (bun run assets)
 /assets/library/
 __pycache__/
