@@ -1,3 +1,4 @@
+import { drawFloorTextures } from "./floor-textures.ts";
 import type { RoughCanvas } from "roughjs/bin/canvas";
 import type { Cell, Dungeon, Room } from "../engine/types.ts";
 import { CellType, isCaveShape } from "../engine/types.ts";
@@ -420,6 +421,7 @@ export function drawSketchWalls(
 
   ctx.fillStyle = theme.parchment;
   ctx.fill(floorPath, "nonzero");
+  drawFloorTextures(ctx, dungeon, cellSize, floorPath);
 
   ctx.save();
   ctx.clip(floorPath, "nonzero");

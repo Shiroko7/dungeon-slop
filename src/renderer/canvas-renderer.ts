@@ -5,6 +5,8 @@ import { CellType, FeatureType, isCaveShape } from "../engine/types.ts";
 import type { ThemePalette } from "./themes/theme-engine.ts";
 import { getRoomGeometry, createRoomPath } from "./room-shapes.ts";
 import { drawDoorSymbols } from "./door-symbols.ts";
+import { drawBackgroundTexture, hasFloorTexture } from "./floor-textures.ts";
+import { drawMapObjects } from "./map-objects.ts";
 import {
   drawSketchWalls,
   drawTrapGlyph,
@@ -29,6 +31,12 @@ export interface StaticLayerOptions {
   showGrid: boolean;
   hiddenFeatureTypes?: ReadonlySet<FeatureType>;
   includeRoomLabels?: boolean;
+  /**
+   * Draw the style's background texture (default true). The live view passes
+   * false and paints it once under the whole viewport instead, so the map and
+   * the canvas around it show one continuous surface.
+   */
+  includeBackground?: boolean;
 }
 
 const WALKABLE = new Set([CellType.Floor, CellType.Corridor, CellType.Door, CellType.SecretDoor, CellType.StairsUp, CellType.StairsDown]);
@@ -132,14 +140,20 @@ export function renderStaticLayers(
 ): void {
   const {
     cellSize, theme, showGrid, hiddenFeatureTypes,
-    includeRoomLabels = true,
+    includeRoomLabels = true, includeBackground = true,
   } = opts;
 
   const floorPath = getCachedFloorPath(dungeon, cellSize);
 
-  // 1. Paper background
-  ctx.fillStyle = theme.paper;
-  ctx.fillRect(0, 0, dungeon.width * cellSize, dungeon.height * cellSize);
+  // 1. Paper background, or the style's background texture
+  const W = dungeon.width * cellSize, H = dungeon.height * cellSize;
+  if (!includeBackground && dungeon.style?.background) {
+    ctx.clearRect(0, 0, W, H);
+  } else {
+    ctx.fillStyle = theme.paper;
+    ctx.fillRect(0, 0, W, H);
+    drawBackgroundTexture(ctx, dungeon, cellSize, 0, 0, W, H);
+  }
 
   // 3. Walls: a heavy ink band, the parchment floor over it, the shaded inner face
   drawSketchWalls(ctx, dungeon, cellSize, theme, floorPath);
@@ -151,6 +165,9 @@ export function renderStaticLayers(
     drawGridDots(ctx, dungeon.width, dungeon.height, cellSize, theme);
     ctx.restore();
   }
+
+  // 8. Placed objects (Stamp tool), on the floor and under every symbol
+  drawMapObjects(ctx, dungeon, cellSize, floorPath);
 
   // 9. Stairs + feature glyphs, door symbols
   const rc = rough.canvas(ctx.canvas as HTMLCanvasElement);
@@ -310,9 +327,17 @@ function drawRoomLabels(
   const fontSize = Math.max(9, cellSize * 0.72);
   ctx.font = `${fontSize}px 'Patrick Hand', 'Segoe Print', cursive`;
 
+  // On a textured floor the ink numbers need a parchment halo to stay legible.
+  const halo = hasFloorTexture(dungeon);
+  if (halo) {
+    ctx.strokeStyle = theme.parchment;
+    ctx.lineWidth = Math.max(2, fontSize * 0.22);
+    ctx.lineJoin = "round";
+  }
   for (const room of dungeon.rooms) {
     const cx = (room.centerX + 0.5) * cellSize;
     const cy = (room.centerY + 0.5) * cellSize;
+    if (halo) ctx.strokeText(String(room.id), cx, cy);
     ctx.fillText(String(room.id), cx, cy);
   }
 }

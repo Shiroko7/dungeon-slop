@@ -92,18 +92,39 @@ export function MapLegend() {
   const dungeon = useDungeonStore((s) => s.dungeon);
   const hiddenFeatureTypes = useUIStore((s) => s.hiddenFeatureTypes);
   const toggleFeatureType = useUIStore((s) => s.toggleFeatureType);
+  const showRoomNumbers = useUIStore((s) => s.showRoomNumbers);
+  const showPathLetters = useUIStore((s) => s.showPathLetters);
+  const toggleRoomNumbers = useUIStore((s) => s.toggleRoomNumbers);
+  const togglePathLetters = useUIStore((s) => s.togglePathLetters);
 
   if (!dungeon) return null;
 
   const presentTypes = new Set(dungeon.features.map((f) => f.type));
   const visibleEntries = LEGEND_ENTRIES.filter((e) => presentTypes.has(e.type));
 
-  if (visibleEntries.length === 0) return null;
-
   return (
     <div className="map-legend">
       <div className="map-legend-title">Legend</div>
       <div className="map-legend-items">
+        <button
+          className={`map-legend-item${showRoomNumbers ? "" : " map-legend-item--hidden"}`}
+          onClick={toggleRoomNumbers}
+          aria-pressed={showRoomNumbers}
+          title={showRoomNumbers ? "Hide room numbers" : "Show room numbers"}
+        >
+          <span className="map-legend-icon map-legend-glyph" aria-hidden="true">1</span>
+          <span className="map-legend-label">Room numbers</span>
+        </button>
+        <button
+          className={`map-legend-item${showPathLetters ? "" : " map-legend-item--hidden"}`}
+          onClick={togglePathLetters}
+          aria-pressed={showPathLetters}
+          title={showPathLetters ? "Hide path letters" : "Show path letters"}
+        >
+          <span className="map-legend-icon map-legend-glyph map-legend-glyph--badge" aria-hidden="true">A</span>
+          <span className="map-legend-label">Path letters</span>
+        </button>
+        {visibleEntries.length > 0 && <div className="map-legend-divider" role="separator" />}
         {visibleEntries.map((entry) => {
           const isHidden = hiddenFeatureTypes.includes(entry.type);
           return (

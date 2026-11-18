@@ -11,6 +11,10 @@ const ZOOM_BTN_FACTOR = 1.2;
 export function Toolbar() {
   const config = useDungeonStore((s) => s.proposedConfig ?? s.config);
   const dungeon = useDungeonStore((s) => s.dungeon);
+  const showRoomNumbers = useUIStore((s) => s.showRoomNumbers);
+  const showPathLetters = useUIStore((s) => s.showPathLetters);
+  const toggleRoomNumbers = useUIStore((s) => s.toggleRoomNumbers);
+  const togglePathLetters = useUIStore((s) => s.togglePathLetters);
   const isGeneratingDungeon = useDungeonStore((s) => s.isGeneratingDungeon);
   const generateDungeonFromConfig = useDungeonStore(
     (s) => s.generateDungeonFromConfig,
@@ -197,6 +201,27 @@ export function Toolbar() {
         >
           &#8634;
         </Button>
+
+        <span className="toolbar-divider" />
+
+        <button
+          className={`toolbar-toggle${showRoomNumbers ? " is-on" : ""}`}
+          onClick={toggleRoomNumbers}
+          disabled={!dungeon}
+          aria-pressed={showRoomNumbers}
+          title={showRoomNumbers ? "Hide room numbers" : "Show room numbers"}
+        >
+          <span className="toolbar-toggle-glyph" aria-hidden="true">1</span> Rooms
+        </button>
+        <button
+          className={`toolbar-toggle${showPathLetters ? " is-on" : ""}`}
+          onClick={togglePathLetters}
+          disabled={!dungeon}
+          aria-pressed={showPathLetters}
+          title={showPathLetters ? "Hide path letters" : "Show path letters"}
+        >
+          <span className="toolbar-toggle-glyph toolbar-toggle-glyph--badge" aria-hidden="true">A</span> Paths
+        </button>
       </div>
 
       <div className="toolbar-right">

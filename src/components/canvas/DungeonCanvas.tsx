@@ -9,6 +9,12 @@ import { EditEngine } from "../../engine/edit-engine.ts";
 import type { EditTool } from "../../engine/edit-engine.ts";
 import type { Dungeon, Room } from "../../engine/types.ts";
 import { isCaveShape } from "../../engine/types.ts";
+import { drawBackgroundTexture, onTextureLoaded } from "../../renderer/floor-textures.ts";
+import { drawMapObject, drawObjectSelection, objectAt } from "../../renderer/map-objects.ts";
+import { newObjectId, useStampStore } from "../map-art/stamp-store.ts";
+import { patchObject } from "../map-art/StampTool.tsx";
+import { applyStyle } from "../map-art/style-layers.ts";
+import type { MapObject } from "../../engine/types.ts";
 import { getTheme, type ThemePalette } from "../../renderer/themes/theme-engine.ts";
 import {
   renderStaticLayers,
@@ -69,6 +75,11 @@ function screenToGrid(
     x: Math.floor((canvasX - panX) / zoom / CELL_SIZE),
     y: Math.floor((canvasY - panY) / zoom / CELL_SIZE),
   };
+}
+
+/** Canvas px → grid cells, fractional (for placing and hit-testing objects). */
+function screenToCells(canvasX: number, canvasY: number, panX: number, panY: number, zoom: number): { x: number; y: number } {
+  return { x: (canvasX - panX) / zoom / CELL_SIZE, y: (canvasY - panY) / zoom / CELL_SIZE };
 }
 
 function findRoomAtPosition(
@@ -167,6 +178,10 @@ export function DungeonCanvas() {
   // Pan state
   const isDragging = useRef(false);
   const dragStart  = useRef({ x: 0, y: 0 });
+  // Stamp tool: an object being dragged (offset from the cursor, cells), and a
+  // press on empty map that becomes a placement if it does not turn into a pan.
+  const objectDrag   = useRef<{ id: string; dx: number; dy: number; raf: number; to: { x: number; y: number } | null } | null>(null);
+  const stampPress   = useRef<{ clientX: number; clientY: number } | null>(null);
 
   // Dungeon buffer
   const dungeonBuffer    = useRef<OffscreenCanvas | null>(null);
@@ -193,6 +208,12 @@ export function DungeonCanvas() {
   const darkMode           = useUIStore((s) => s.darkMode);
   const editMode           = useUIStore((s) => s.editMode);
   const hiddenFeatureTypes = useUIStore((s) => s.hiddenFeatureTypes);
+  const showRoomNumbers    = useUIStore((s) => s.showRoomNumbers);
+  const showPathLetters    = useUIStore((s) => s.showPathLetters);
+
+  // Floor textures load asynchronously; each arrival rebuilds the static buffer.
+  const [textureVersion, setTextureVersion] = useState(0);
+  useEffect(() => onTextureLoaded(() => setTextureVersion((v) => v + 1)), []);
 
   useEffect(() => { cellColorsRef.current = getCellColors(); }, [darkMode]);
   useEffect(() => { if (dungeon) themeRef.current = getTheme(dungeon.config.motif); }, [dungeon, darkMode]);
@@ -210,11 +231,13 @@ export function DungeonCanvas() {
       cellSize: CELL_SIZE,
       theme,
       showGrid: true,
+      includeRoomLabels: useUIStore.getState().showRoomNumbers,
       hiddenFeatureTypes: new Set(hiddenFeatureTypes),
+      includeBackground: false,
     }, scale);
     bufferScaleRef.current = scale;
     dungeonBufferFor.current = dungeon;
-  }, [dungeon, darkMode, hiddenFeatureTypes]);
+  }, [dungeon, darkMode, hiddenFeatureTypes, textureVersion, showRoomNumbers]);
 
   // ── Resize canvas (backing store in device px, layout stays CSS-driven) ───
   useEffect(() => {
@@ -285,7 +308,9 @@ export function DungeonCanvas() {
             cellSize: CELL_SIZE,
             theme: themeRef.current,
             showGrid: true,
+      includeRoomLabels: useUIStore.getState().showRoomNumbers,
             hiddenFeatureTypes: new Set(useUIStore.getState().hiddenFeatureTypes),
+            includeBackground: false,
           }, targetScale);
           bufferScaleRef.current = targetScale;
           dungeonBufferFor.current = d;
@@ -302,6 +327,8 @@ export function DungeonCanvas() {
         cellColorsRef.current, themeRef.current,
         hoverCell.current?.x, hoverCell.current?.y,
         engine.current.version,
+        useUIStore.getState().artTool,
+        useStampStore.getState(),
       ];
       let dirty = sig.length !== prevSig.length;
       if (!dirty) {
@@ -334,6 +361,9 @@ export function DungeonCanvas() {
       ctx.translate(panX, panY);
       ctx.scale(zoom, zoom);
 
+      // A background texture continues past the map's edge across the viewport.
+      drawBackgroundTexture(ctx, d, CELL_SIZE, -panX / zoom, -panY / zoom, cssW / zoom, cssH / zoom);
+
       // Blit the static pre-rendered buffer (fast GPU drawImage).
       // The buffer is rendered at bufferScale× resolution; map it back to
       // world CSS-px size so the transform stays scale-agnostic.
@@ -350,7 +380,9 @@ export function DungeonCanvas() {
           cellSize: CELL_SIZE,
           theme,
           showGrid: true,
+      includeRoomLabels: useUIStore.getState().showRoomNumbers,
           hiddenFeatureTypes: new Set(useUIStore.getState().hiddenFeatureTypes),
+          includeBackground: false,
         });
       }
 
@@ -448,6 +480,19 @@ export function DungeonCanvas() {
         }
       }
 
+      // ── Stamp tool: selection frame and the ghost of the next placement ──────
+      if (!isEditing && useUIStore.getState().artTool === "stamp") {
+        const st = useStampStore.getState();
+        const sel = st.selectedObjectId ? d.style?.objects?.find((o) => o.id === st.selectedObjectId) : undefined;
+        if (sel) drawObjectSelection(ctx, sel, CELL_SIZE, colors.selectStroke, 1.5 / zoom);
+        if (!sel && st.asset && st.hover && !objectDrag.current) {
+          drawMapObject(ctx, {
+            id: "ghost", asset: st.asset, x: st.hover.x, y: st.hover.y, size: st.size,
+            rotation: st.rotation, opacity: st.opacity, shadow: st.shadow, flipX: st.flipX,
+          }, CELL_SIZE, true);
+        }
+      }
+
       ctx.restore();
       rafHandle.current = requestAnimationFrame(frame);
     };
@@ -459,7 +504,27 @@ export function DungeonCanvas() {
   // ── Mouse handlers ────────────────────────────────────────────────────────
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const { panX, panY, zoom, editMode: isEditing, activeTool, setEditLockedRoomId } = useUIStore.getState();
+    const { panX, panY, zoom, editMode: isEditing, activeTool, setEditLockedRoomId, artTool } = useUIStore.getState();
+
+    if (!isEditing && artTool === "stamp") {
+      const canvas = canvasRef.current;
+      const d = useDungeonStore.getState().dungeon;
+      if (!canvas || !d) return;
+      const rect = canvas.getBoundingClientRect();
+      const p = screenToCells(e.clientX - rect.left, e.clientY - rect.top, panX, panY, zoom);
+      const hit = objectAt(d.style?.objects ?? [], p.x, p.y);
+      if (hit) {
+        // Select it and start moving it; one undo step for the whole drag.
+        useStampStore.getState().select(hit.id);
+        useDungeonStore.getState().pushEditSnapshot();
+        objectDrag.current = { id: hit.id, dx: hit.x - p.x, dy: hit.y - p.y, raf: 0, to: null };
+        return;
+      }
+      stampPress.current = { clientX: e.clientX, clientY: e.clientY };
+      isDragging.current = true;
+      dragStart.current  = { x: e.clientX - panX, y: e.clientY - panY };
+      return;
+    }
 
     if (isEditing) {
       if (activeTool === "select") {
@@ -499,7 +564,32 @@ export function DungeonCanvas() {
     const canvasX = e.clientX - rect.left;
     const canvasY = e.clientY - rect.top;
 
-    const { panX, panY, zoom, editMode: isEditing, activeTool, setHoveredRoomId, setHoveredCorridorId, setPan } = useUIStore.getState();
+    const { panX, panY, zoom, editMode: isEditing, activeTool, setHoveredRoomId, setHoveredCorridorId, setPan, artTool } = useUIStore.getState();
+
+    if (!isEditing && artTool === "stamp") {
+      const p = screenToCells(canvasX, canvasY, panX, panY, zoom);
+      const drag = objectDrag.current;
+      if (drag) {
+        // Coalesce moves to one store update per frame.
+        drag.to = { x: p.x + drag.dx, y: p.y + drag.dy };
+        if (!drag.raf) {
+          drag.raf = requestAnimationFrame(() => {
+            const cur = objectDrag.current;
+            if (!cur) return;
+            cur.raf = 0;
+            const o = useDungeonStore.getState().dungeon?.style?.objects?.find((x) => x.id === cur.id);
+            if (o && cur.to) patchObject(o.id, { ...o, x: cur.to.x, y: cur.to.y });
+          });
+        }
+        return;
+      }
+      if (isDragging.current) {
+        setPan(e.clientX - dragStart.current.x, e.clientY - dragStart.current.y);
+        return;
+      }
+      useStampStore.getState().setHover(p);
+      return;
+    }
 
     if (isEditing) {
       const { x, y } = screenToGrid(canvasX, canvasY, panX, panY, zoom);
@@ -547,7 +637,43 @@ export function DungeonCanvas() {
   }, []);
 
   const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const { panX, panY, zoom, editMode: isEditing, activeTool, setSelectedRoomId, setEditLockedRoomId } = useUIStore.getState();
+    const { panX, panY, zoom, editMode: isEditing, activeTool, setSelectedRoomId, setEditLockedRoomId, artTool } = useUIStore.getState();
+
+    if (!isEditing && artTool === "stamp") {
+      const drag = objectDrag.current;
+      if (drag) {
+        // Apply the last position now: a release can beat the pending frame.
+        if (drag.raf) cancelAnimationFrame(drag.raf);
+        const o = useDungeonStore.getState().dungeon?.style?.objects?.find((x) => x.id === drag.id);
+        if (o && drag.to) patchObject(o.id, { ...o, x: drag.to.x, y: drag.to.y });
+        objectDrag.current = null;
+        return;
+      }
+      isDragging.current = false;
+      const press = stampPress.current;
+      stampPress.current = null;
+      if (!press || Math.abs(e.clientX - press.clientX) > 3 || Math.abs(e.clientY - press.clientY) > 3) return; // was a pan
+      const st = useStampStore.getState();
+      if (st.selectedObjectId) {
+        st.select(null); // first click on empty map just deselects
+        return;
+      }
+      const canvas = canvasRef.current;
+      const d = useDungeonStore.getState().dungeon;
+      if (!canvas || !d || !st.asset) return;
+      const rect = canvas.getBoundingClientRect();
+      const p = screenToCells(e.clientX - rect.left, e.clientY - rect.top, panX, panY, zoom);
+      if (p.x < 0 || p.y < 0 || p.x > d.width || p.y > d.height) return;
+      const obj: MapObject = {
+        id: newObjectId(), asset: st.asset, x: p.x, y: p.y, size: st.size,
+        rotation: st.randomRotation ? Math.floor(Math.random() * 360) : st.rotation,
+        opacity: st.opacity, shadow: st.shadow, flipX: st.flipX,
+      };
+      const store = useDungeonStore.getState();
+      store.pushEditSnapshot();
+      store.patchDungeon((dd) => applyStyle(dd, { ...dd.style, objects: [...(dd.style?.objects ?? []), obj] }));
+      return;
+    }
 
     if (isEditing) {
       if (activeTool === "select") {
@@ -582,6 +708,13 @@ export function DungeonCanvas() {
 
   const handleMouseLeave = useCallback(() => {
     const { editMode: isEditing, activeTool, setHoveredRoomId, setHoveredCorridorId, setEditLockedRoomId } = useUIStore.getState();
+
+    useStampStore.getState().setHover(null);
+    stampPress.current = null;
+    if (objectDrag.current) {
+      if (objectDrag.current.raf) cancelAnimationFrame(objectDrag.current.raf);
+      objectDrag.current = null;
+    }
 
     hoverGridCellRef.current = null;
 
@@ -667,6 +800,7 @@ export function DungeonCanvas() {
 
   // ── Active tool data-attribute (drives CSS cursor) ────────────────────────
   const activeTool         = useUIStore((s) => s.activeTool);
+  const artTool            = useUIStore((s) => s.artTool);
   const roomIdInspectMode  = useUIStore((s) => s.roomIdInspectMode);
   const toggleRoomIdInspectMode = useUIStore((s) => s.toggleRoomIdInspectMode);
 
@@ -679,13 +813,13 @@ export function DungeonCanvas() {
       <canvas
         ref={canvasRef}
         className="dungeon-canvas"
-        style={editMode && activeTool !== "select" ? { cursor: "crosshair" } : undefined}
+        style={(editMode && activeTool !== "select") || (!editMode && artTool === "stamp") ? { cursor: "crosshair" } : undefined}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
       />
-      {dungeon && (!editMode || activeTool === "select") && <SvgOverlay />}
+      {dungeon && showPathLetters && <SvgOverlay />}
       {editMode && dungeon && <EditToolPalette />}
       {dungeon && (
         <button

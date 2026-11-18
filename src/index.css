@@ -1485,6 +1485,52 @@ input:focus, select:focus, textarea:focus {
   text-decoration: line-through;
 }
 
+/* Room number / path letter toggles: drawn like the marks they control */
+.map-legend-glyph {
+  font-family: "Patrick Hand", "Segoe Print", cursive;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.map-legend-glyph--badge {
+  border-radius: 50%;
+  background: #2c2c30;
+  color: #fff;
+  font-family: inherit;
+  font-size: 9px;
+}
+
+/* Label visibility toggles in the top toolbar */
+.toolbar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: line-through;
+}
+.toolbar-toggle.is-on { color: var(--text); text-decoration: none; background: var(--bg-surface); }
+.toolbar-toggle:hover:not(:disabled) { border-color: var(--accent); }
+.toolbar-toggle:disabled { opacity: 0.4; cursor: default; }
+.toolbar-toggle-glyph { font-weight: 700; }
+.toolbar-toggle-glyph--badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #2c2c30; color: #fff; font-size: 9px;
+}
+.toolbar-toggle + .toolbar-toggle { margin-left: 4px; }
+
+.map-legend-divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
 .map-legend-swatch {
   width: 14px;
   height: 14px;

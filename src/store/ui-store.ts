@@ -3,6 +3,8 @@ import { persist } from "zustand/middleware";
 import { FeatureType } from "../engine/types.ts";
 import type { EditTool } from "../engine/edit-engine.ts";
 
+export type ArtTool = "select" | "textures" | "stamp";
+
 export const ZOOM_MIN = 0.2;
 export const ZOOM_MAX = 3;
 
@@ -34,6 +36,13 @@ interface UIState {
 
   // Legend visibility
   hiddenFeatureTypes: FeatureType[];
+  /** Room numbers drawn on the map (screen only; exports keep them). */
+  showRoomNumbers: boolean;
+  /** Corridor letters (A, B, ...) drawn over passages. */
+  showPathLetters: boolean;
+
+  // Map art tool rail: "select" is ordinary map interaction
+  artTool: ArtTool;
 
   // Edit mode
   editMode: boolean;
@@ -60,6 +69,9 @@ interface UIState {
   setIsExportOpen: (v: boolean) => void;
   resetView: () => void;
   toggleFeatureType: (type: FeatureType) => void;
+  setArtTool: (tool: ArtTool) => void;
+  toggleRoomNumbers: () => void;
+  togglePathLetters: () => void;
   toggleEditMode: () => void;
   setActiveTool: (tool: EditTool) => void;
   setEditLockedRoomId: (id: number | null) => void;
@@ -75,6 +87,7 @@ const transientDefaults = {
   hoveredCorridorId: null as number | null,
   isSettingsOpen: false,
   isExportOpen: false,
+  artTool: "select" as ArtTool,
   editMode: false,
   activeTool: "floor" as EditTool,
   editLockedRoomId: null as number | null,
@@ -87,6 +100,8 @@ export const useUIStore = create<UIState>()(
       ...transientDefaults,
       canvasW: 0,
       canvasH: 0,
+      showRoomNumbers: true,
+      showPathLetters: true,
       isSidebarOpen: true,
       darkMode: true,
       promptText: "",
@@ -123,6 +138,9 @@ export const useUIStore = create<UIState>()(
           ? state.hiddenFeatureTypes.filter((t) => t !== type)
           : [...state.hiddenFeatureTypes, type],
       })),
+      setArtTool: (artTool) => set({ artTool }),
+      toggleRoomNumbers: () => set((state) => ({ showRoomNumbers: !state.showRoomNumbers })),
+      togglePathLetters: () => set((state) => ({ showPathLetters: !state.showPathLetters })),
       toggleEditMode: () => set((state) => ({ editMode: !state.editMode, editLockedRoomId: null })),
       setActiveTool: (tool) => set({ activeTool: tool }),
       setEditLockedRoomId: (id) => set({ editLockedRoomId: id }),
@@ -134,6 +152,8 @@ export const useUIStore = create<UIState>()(
         darkMode: state.darkMode,
         isSidebarOpen: state.isSidebarOpen,
         promptText: state.promptText,
+        showRoomNumbers: state.showRoomNumbers,
+        showPathLetters: state.showPathLetters,
       }),
     },
   ),

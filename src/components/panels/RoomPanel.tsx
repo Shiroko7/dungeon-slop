@@ -1,3 +1,8 @@
+import { LayerEditor } from "../map-art/LayerEditor.tsx";
+import { patchObject } from "../map-art/StampTool.tsx";
+import { useStampStore } from "../map-art/stamp-store.ts";
+import { assetTitle, thumbUrl, useAssetStore } from "../map-art/asset-store.ts";
+import { objectRoomId } from "../../renderer/map-objects.ts";
 import { roomName } from "../../engine/room-name.ts";
 import { useState, useCallback } from "react";
 import { useDungeonStore } from "../../store/dungeon-store.ts";
@@ -373,6 +378,71 @@ function RoomDetail({
   );
 }
 
+/** The room's art: its floor (own texture, or the map floor it inherits) and the objects in it. */
+function RoomArt({ roomId }: { roomId: number }) {
+  const dungeon = useDungeonStore((s) => s.dungeon);
+  const assets = useAssetStore((s) => s.assets);
+  const selectedObjectId = useStampStore((s) => s.selectedObjectId);
+  const setArtTool = useUIStore((s) => s.setArtTool);
+  const objects = dungeon ? (dungeon.style?.objects ?? []).filter((o) => objectRoomId(dungeon, o) === roomId) : [];
+
+  return (
+    <div className="room-detail-section room-art">
+      <h4 className="room-detail-section-title">Room art</h4>
+      <LayerEditor
+        key={roomId}
+        layerKey={`room:${roomId}`}
+        label="Floor"
+        emptyHint="Pick a texture to give this room a floor of its own."
+      />
+      <section className="art-card">
+        <div className="art-card-row">
+          <span className="art-card-title art-card-title--strong">Objects ({objects.length})</span>
+          <button className="art-chip" onClick={() => setArtTool("stamp")}>+ Place objects</button>
+        </div>
+        {objects.length === 0 ? (
+          <p className="art-empty">Nothing placed in this room yet. Use the Stamp tool to place props, decals and tokens.</p>
+        ) : (
+          <ul className="art-layers">
+            {objects.map((o) => {
+              const a = assets.find((x) => x.id === o.asset);
+              return (
+                <li
+                  key={o.id}
+                  className={`art-layer${o.id === selectedObjectId ? " art-layer--active" : ""}`}
+                  onClick={() => {
+                    setArtTool("stamp");
+                    useStampStore.getState().select(o.id);
+                  }}
+                >
+                  <span className="art-layer-thumb art-swatch--alpha" style={{ backgroundImage: `url(${thumbUrl(o.asset, 96)})`, backgroundSize: "contain", backgroundRepeat: "no-repeat" }} />
+                  <span className="art-layer-text">
+                    <span className="art-layer-label">{a ? assetTitle(a) : o.asset}</span>
+                    <span className="art-layer-hint">{o.size} cells{o.rotation ? ` · ${o.rotation}°` : ""}</span>
+                  </span>
+                  <button
+                    className="art-icon-btn art-layer-remove"
+                    aria-label="Delete object"
+                    title="Delete object"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      useDungeonStore.getState().pushEditSnapshot();
+                      patchObject(o.id, null);
+                      if (useStampStore.getState().selectedObjectId === o.id) useStampStore.getState().select(null);
+                    }}
+                  >
+                    ×
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export function RoomPanel() {
   const dungeon = useDungeonStore((s) => s.dungeon);
   const roomDescriptions = useDungeonStore((s) => s.roomDescriptions);
@@ -417,6 +487,7 @@ export function RoomPanel() {
           onBack={() => setSelectedRoomId(null)}
           onRegenerate={handleRegenerate}
         />
+        <RoomArt roomId={selectedRoom.id} />
       </div>
     );
   }

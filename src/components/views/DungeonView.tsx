@@ -7,6 +7,9 @@ import { DungeonCanvas } from "../canvas/DungeonCanvas.tsx";
 import { ExportActions } from "../canvas/ExportActions.tsx";
 import { DescribeActivityToast } from "../canvas/DescribeActivityToast.tsx";
 import { MapLegend } from "../canvas/MapLegend.tsx";
+import { MapArtTool } from "../map-art/MapArtTool.tsx";
+import { StampTool } from "../map-art/StampTool.tsx";
+import { ToolRail } from "../map-art/ToolRail.tsx";
 import { RoomPanel } from "../panels/RoomPanel.tsx";
 import { DungeonPanel } from "../panels/DungeonPanel.tsx";
 import { LayoutPanel } from "../panels/LayoutPanel.tsx";
@@ -37,6 +40,8 @@ export function DungeonView({
   const setError = useDungeonStore((s) => s.setError);
 
   const selectedRoomId = useUIStore((s) => s.selectedRoomId);
+  const artTool = useUIStore((s) => s.artTool);
+  const editMode = useUIStore((s) => s.editMode);
   const setSelectedRoomId = useUIStore((s) => s.setSelectedRoomId);
 
   useEffect(() => {
@@ -126,6 +131,9 @@ export function DungeonView({
             </div>
           )}
           <DescribeActivityToast />
+          {dungeon !== null && !editMode && <ToolRail />}
+          {dungeon !== null && !editMode && artTool === "textures" && <MapArtTool />}
+          {dungeon !== null && !editMode && artTool === "stamp" && <StampTool />}
           <MapLegend />
           <ExportActions />
         </div>

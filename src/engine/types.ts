@@ -200,7 +200,88 @@ export interface LayoutReport {
   };
 }
 
+/** A seamless texture from the asset library (`bun run assets`) laid over floor. */
+export interface TextureRef {
+  /** Asset id in the library, e.g. "floor-sunken-temple-1a2b3c". */
+  asset: string;
+  /** How many grid cells one repeat of the texture spans (default 4). */
+  cells?: number;
+  /** 0..1: darken the texture by this much (0 = as generated). */
+  shade?: number;
+  /**
+   * Draw the image once, scaled to cover the room's bounds, instead of
+   * repeating it (a round mosaic for a round room). Room overrides only.
+   */
+  fit?: boolean;
+  /** Degrees clockwise. */
+  rotation?: number;
+  /**
+   * "radial" (rooms only): the tile's rows are bent into rings around the
+   * room's circle and its columns become joints running out from the centre,
+   * so courses follow curved walls. Default "grid".
+   */
+  layout?: "grid" | "radial";
+  /** Radial only, 0..1: shift along the rings, so neighbouring rooms' joints don't line up. */
+  stagger?: number;
+  /**
+   * A set of edge-matched variants of the tile (asset ids, the tile itself
+   * included). Each tile position shows one, picked at random but stable, so
+   * large areas stop looking repetitive. Not used with fit.
+   */
+  variants?: string[];
+  /** Changes which variant lands where ("shuffle"). */
+  variantSeed?: number;
+  /**
+   * A second texture laid over this one, at its own scale, to bring in another
+   * texture's look (stains, wear, colour) without its pattern lining up with
+   * the base's stones.
+   */
+  blend?: TextureBlend;
+}
+
+export interface TextureBlend {
+  asset: string;
+  /** Grid cells per repeat; make it much larger than the base's. Default 24. */
+  cells?: number;
+  /** 0..1, default 0.5. */
+  amount?: number;
+  /** How it combines with the base. Default "soft-light". */
+  mode?: "soft-light" | "overlay" | "multiply" | "color" | "normal";
+}
+
+/** A prop, decal or token from the asset library placed on the map (the Stamp tool). */
+export interface MapObject {
+  id: string;
+  asset: string;
+  /** Centre, in grid cells (fractional). */
+  x: number;
+  y: number;
+  /** Width in grid cells; height follows the image's aspect ratio. */
+  size: number;
+  /** Degrees clockwise. */
+  rotation?: number;
+  /** 0..1, default 1. */
+  opacity?: number;
+  /** Soft drop shadow under the object. */
+  shadow?: boolean;
+  flipX?: boolean;
+}
+
+/** Map art chosen for a dungeon. Purely visual; generation never reads it. */
+export interface DungeonStyle {
+  /** Objects on the map, drawn in order (later on top). */
+  objects?: MapObject[];
+  /** Floor of every room and corridor. */
+  floor?: TextureRef;
+  /** Everything outside the floor (the paper around and between rooms), e.g. water. */
+  background?: TextureRef;
+  /** Per-room floor overrides, keyed by room id. */
+  rooms?: Record<string, { floor?: TextureRef }>;
+}
+
 export interface Dungeon {
+  /** Optional map art; see DungeonStyle. */
+  style?: DungeonStyle;
   grid: Cell[][];
   width: number;
   height: number;
