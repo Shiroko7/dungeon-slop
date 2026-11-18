@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { resolve } from "node:path";
 import { SCHEMA, SCHEMA_VERSION } from "./schema.ts";
 import { runMigrations } from "./migrate.ts";
 
@@ -12,6 +13,12 @@ export const DEFAULT_DB_PATH = process.env.NOTES_DB_PATH ?? "notes.sqlite";
  * happily leave a v1 `documents` in place while reporting success.
  */
 export function openAppDb(path: string = process.env.NOTES_DB_PATH ?? DEFAULT_DB_PATH): Database {
+  // A test that reaches the real database writes its fixtures into the user's
+  // campaign list - which is how "Owner A", "Bad Role" and friends got there,
+  // three copies each. `bun test` sets NODE_ENV=test; refuse outright.
+  if (process.env.NODE_ENV === "test" && resolve(path) === resolve("notes.sqlite")) {
+    throw new Error("Tests must not open the real notes.sqlite; set NOTES_DB_PATH or use :memory:");
+  }
   const db = new Database(path, { create: true });
   // Not persisted in the file — has to be re-asserted on every connection.
   db.run("PRAGMA foreign_keys = ON");
