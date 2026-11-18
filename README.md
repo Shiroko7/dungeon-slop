@@ -181,6 +181,23 @@ current room text, and description exports contain GM secrets. Treat exports as 
 material and inspect them before sharing. Player-safe profiles, VTT corrections,
 and large-map export limits are planned in M3.1.
 
+### Maps for a virtual tabletop
+
+`src/export/uvtt.ts` turns a dungeon into Universal VTT geometry, the format most
+virtual tabletops import: wall segments on every edge between floor and stone,
+one door portal per door (wide doorways are one portal), plus an `x_slop` block
+with the floor mask, per-square heights and room labels that other tools ignore.
+The `.dd2vtt` download is built on it, adding the rendered image. The local API
+serves the same geometry without art, for a tabletop to draw its own:
+
+- `POST /api/uvtt` with `{ seed?, config? }` generates a fresh map (no AI, at most 160 squares a side)
+- `GET /api/dungeons/:id/uvtt` returns a saved map, edits included
+
+For a map with its art, export the `.dd2vtt` from the editor (puzzle-slop's battle
+maps take that file). Its tests are invariants like the
+rest: a wall stands on every floor/stone edge and nowhere else, and every ordinary
+door closes its doorway from wall to wall.
+
 ## Running it
 
 ```bash

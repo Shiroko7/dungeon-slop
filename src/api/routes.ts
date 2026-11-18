@@ -51,6 +51,7 @@ import { json, readJson, badRequest, serverError } from "./http.ts";
 import { checkOrigin } from "./origin.ts";
 import { validateAIRequest } from "./ownership.ts";
 import { handleAssetImage, handleAssetThumb, handleFavoriteAsset, handleListAssets } from "./assets.ts";
+import { handleDungeonUVTT, handleGenerateUVTT } from "./uvtt.ts";
 
 /**
  * Routes are matched against a small table rather than a chain of `if`s, so the
@@ -160,6 +161,11 @@ const routes: Route[] = [
     handle: (_r, [id]) => handleDeleteDungeon(id!),
   },
   {
+    method: "GET",
+    pattern: /^\/api\/dungeons\/(\d+)\/uvtt$/,
+    handle: (_req, [id]) => handleDungeonUVTT(id!),
+  },
+  {
     method: "POST",
     pattern: /^\/api\/dungeons\/(\d+)\/fork$/,
     handle: (req, [id]) => handleForkDungeon(req, id!),
@@ -244,6 +250,12 @@ const routes: Route[] = [
     method: "POST",
     pattern: /^\/api\/generate-dungeon$/,
     handle: (req) => handleGenerateDungeon(req),
+  },
+  {
+    // Map geometry for a virtual tabletop (no AI, no image).
+    method: "POST",
+    pattern: /^\/api\/uvtt$/,
+    handle: (req) => handleGenerateUVTT(req),
   },
   {
     method: "POST",

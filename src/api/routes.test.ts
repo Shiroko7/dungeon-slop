@@ -597,3 +597,26 @@ describe("M1 ownership and validation boundaries", () => {
     ).toBe(403);
   });
 });
+
+// ─── Universal VTT ────────────────────────────────────────────────────────────
+
+describe("Universal VTT maps", () => {
+  test("a fresh map for a tabletop is reproducible from its seed and carries no image", async () => {
+    const first = await call("POST", "/api/uvtt", { seed: 42, config: { grid_width: 40, grid_height: 30 } });
+    expect(first.status).toBe(200);
+    expect(first.body.uvtt.resolution.map_size).toEqual({ x: 40, y: 30 });
+    expect(first.body.uvtt.image).toBe("");
+    expect(first.body.uvtt.line_of_sight.length).toBeGreaterThan(0);
+    const again = await call("POST", "/api/uvtt", { seed: 42, config: { grid_width: 40, grid_height: 30 } });
+    expect(again.body.uvtt).toEqual(first.body.uvtt);
+  });
+
+  test("oversized or invalid requests are refused", async () => {
+    expect((await call("POST", "/api/uvtt", { config: { grid_width: 400 } })).status).toBe(400);
+    expect((await call("POST", "/api/uvtt", { config: { motif: "Disco" } })).status).toBe(400);
+  });
+
+  test("a saved map that does not exist is a 404", async () => {
+    expect((await call("GET", "/api/dungeons/987654/uvtt")).status).toBe(404);
+  });
+});
