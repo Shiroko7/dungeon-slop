@@ -9,6 +9,8 @@ landmarks and constraints, and label unsupported connective ideas as assumptions
 
 {
   "name": "short name for the dungeon",
+  "layout": "graph" | "radial",
+  "scale": 1,
   "nodes": [
     {
       "key": "lowercase-hyphenated-id",
@@ -18,7 +20,9 @@ landmarks and constraints, and label unsupported connective ideas as assumptions
       "wing": "optional-branch-id",
       "size": "Tiny" | "Small" | "Medium" | "Large" | "Huge",
       "shape": "Rectangular" | "Square" | "Circular" | "Hexagonal" | "Pentagonal" | "Cave" | "Cross" | "Diamond",
-      "notes": "What happens here — the encounter, the hazard, the reason to come."
+      "notes": "What happens here — the encounter, the hazard, the reason to come.",
+      "ring": 0,
+      "sector": 0
     }
   ],
   "edges": [
@@ -51,6 +55,41 @@ LAYOUT RULES — these are what make a floor plan good rather than merely connec
 5. Use "wing" when a place has genuinely parallel branches — three wings off one landing share a hub and each gets its own wing id. Rooms in a wing are placed together and away from other wings.
 6. Gate the late game. At least one edge deep in the plan should carry "gating" naming what opens it.
 7. 8 to 20 rooms unless asked otherwise. Fewer is thin; more is a slog nobody maps.
+
+RADIAL LAYOUT — omit "layout" (or use "graph") unless the place is genuinely round:
+- Use "layout": "radial" for a place built around a centre: a round hall ringed by
+  chambers, a tower floor, a temple of concentric circles, rooms laid out like a
+  clock face or the phases of the moon.
+- Exactly one node has "ring": 0 — the round room in the middle. Every other node
+  is a slice of a ring around it: "ring": 1 is the first ring, "ring": 2 the one
+  outside that (at most 3). A ring needs at least two slices.
+- "sector" orders the slices of a ring clockwise starting at twelve o'clock: 0 is
+  the slice just right of twelve, then onward round the clock. Slices of one ring
+  share its circle equally.
+- Rooms that touch: the centre and each ring-1 slice; neighbouring slices of the
+  same ring; a slice and the slices directly outside it. Connect rooms that touch
+  — each edge becomes a door in the wall between them. An edge between rooms that
+  do not touch becomes a corridor running round the outside.
+- Size still matters: the centre's size sets its diameter; the largest size in a
+  ring sets that ring's depth. "shape" is ignored on a radial plan.
+- "ring" and "sector" mean nothing on a graph plan; leave them out there.
+
+SCALE — optional, 0.5 to 4, default 1. Multiplies every room's size: 2 builds the
+same plan twice as big across. Use it only when asked for a bigger or smaller map.
+
+GAP — radial layout only, optional, 1.25 to 8, default 1.25: cells of rock between
+neighbouring rooms. Wider gaps make channels between the rooms, crossed by short
+corridors. Use it when asked for longer passages or more space between rooms.
+
+DOORWIDTH — radial layout only, optional, 1 to 3, default 1: how many cells wide
+each doorway between neighbouring rooms is. Use it when asked for wider doors,
+corridors or passages: the rooms stay where they are, the openings get wider.
+
+DOORS AND GATES
+- "door" on an edge picks the door drawn on that connection: Open, Archway,
+  Portcullis, Standard, Locked, Secure, Trapped or Secret.
+- An edge with "gating" and no "door" is drawn with a locked door on the side of
+  its "to" room, so put the gated room in "to".
 
 WHEN REPRODUCING A REAL PLACE (a named raid, a published module, a location from fiction):
 - Use its ACTUAL landmark names, in its actual order. This is the whole point — a plan for Icecrown Citadel whose rooms are called "Frozen Hall" and "Icy Chamber" has failed.

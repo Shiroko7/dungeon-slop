@@ -1,6 +1,7 @@
 import type { Room } from "../engine/types.ts";
 import { CellType, PENTAGON_W, PENTAGON_H } from "../engine/types.ts";
 import type { Cell } from "../engine/types.ts";
+import { pointInSector, sectorArcAngles, type SectorGeometry } from "../engine/sector.ts";
 
 export interface Point {
   x: number;
@@ -8,7 +9,7 @@ export interface Point {
 }
 
 export interface RoomGeometry {
-  type: "ellipse" | "polygon" | "path" | "rect";
+  type: "ellipse" | "polygon" | "path" | "rect" | "sector";
   centerX: number;
   centerY: number;
   // For ellipse
@@ -19,6 +20,8 @@ export interface RoomGeometry {
   // For path (cross shape): the bars whose union makes the shape. Kept as plain
   // rects rather than a Path2D so describing a room needs no canvas.
   rects?: Array<{ x: number; y: number; width: number; height: number }>;
+  // For sector: the ring slice, scaled to the same units as everything else here.
+  sector?: SectorGeometry;
   // Bounding box
   bounds: {
     x: number;
@@ -86,6 +89,25 @@ function buildRoomGeometry(room: Room, cellSize: number): RoomGeometry {
     width: boundsWidth,
     height: boundsHeight,
   };
+
+  if (room.sector !== undefined) {
+    const s = room.sector;
+    return {
+      type: "sector",
+      centerX: (room.centerX + 0.5) * cellSize,
+      centerY: (room.centerY + 0.5) * cellSize,
+      sector: {
+        cx: s.cx * cellSize,
+        cy: s.cy * cellSize,
+        innerRadius: s.innerRadius * cellSize,
+        outerRadius: s.outerRadius * cellSize,
+        startAngle: s.startAngle,
+        endAngle: s.endAngle,
+        inset: s.inset * cellSize,
+      },
+      bounds,
+    };
+  }
 
   switch (room.shape) {
     case "Circular": {
@@ -239,6 +261,17 @@ export function createRoomPath(geometry: RoomGeometry): Path2D {
       for (const r of geometry.rects ?? []) path.rect(r.x, r.y, r.width, r.height);
       break;
 
+    case "sector":
+      if (geometry.sector) {
+        const s = geometry.sector;
+        const outer = sectorArcAngles(s, s.outerRadius);
+        const inner = sectorArcAngles(s, s.innerRadius);
+        path.arc(s.cx, s.cy, s.outerRadius, outer.from, outer.to, false);
+        path.arc(s.cx, s.cy, s.innerRadius, inner.to, inner.from, true);
+        path.closePath();
+      }
+      break;
+
     case "rect":
       path.rect(
         geometry.bounds.x,
@@ -292,6 +325,8 @@ export function pointInRoomShape(room: Room, px: number, py: number, cellSize: n
       }
       return true;
     }
+    case "sector":
+      return geo.sector !== undefined && pointInSector(geo.sector, px, py);
     case "path":
       // Cross: the union of a horizontal and a vertical bar.
       return (geo.rects ?? []).some(

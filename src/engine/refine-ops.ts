@@ -72,6 +72,9 @@ export const RefineOpSchema = z.discriminatedUnion("op", [
     size: z.enum(["Tiny", "Small", "Medium", "Large", "Huge"]).default("Medium"),
     wing: z.string().max(60).optional(),
     notes: z.string().max(400).optional(),
+    /** Radial plans: which ring and slot the new room takes. */
+    ring: z.number().int().min(1).max(3).optional(),
+    sector: z.number().int().min(0).max(39).optional(),
     connectTo: z.array(z.string()).min(1),
     reason: z.string().max(300).optional(),
   }),
@@ -120,6 +123,10 @@ export function describeOp(op: RefineOp): string {
 function cloneBlueprint(blueprint: Blueprint): Blueprint {
   return {
     name: blueprint.name,
+    ...(blueprint.layout !== undefined ? { layout: blueprint.layout } : {}),
+    ...(blueprint.scale !== undefined ? { scale: blueprint.scale } : {}),
+    ...(blueprint.gap !== undefined ? { gap: blueprint.gap } : {}),
+    ...(blueprint.doorWidth !== undefined ? { doorWidth: blueprint.doorWidth } : {}),
     nodes: blueprint.nodes.map((n) => ({ ...n })),
     edges: blueprint.edges.map((e) => ({ ...e })),
     grounding: blueprint.grounding,
@@ -261,6 +268,8 @@ export function applyRefineOps(
           size: op.size,
           ...(op.wing !== undefined ? { wing: op.wing } : {}),
           ...(op.notes !== undefined ? { notes: op.notes } : {}),
+          ...(op.ring !== undefined ? { ring: op.ring } : {}),
+          ...(op.sector !== undefined ? { sector: op.sector } : {}),
         });
         for (const anchor of anchors) next.edges.push({ from: anchor, to: op.key });
         accept();
@@ -325,6 +334,8 @@ export function blueprintFromDungeon(dungeon: Dungeon): Blueprint {
     size: sizeFor(Math.max(room.width, room.height)),
     ...(room.plan?.wing !== undefined ? { wing: room.plan.wing } : {}),
     ...(room.plan?.notes !== undefined ? { notes: room.plan.notes } : {}),
+    ...(room.plan?.ring !== undefined ? { ring: room.plan.ring } : {}),
+    ...(room.plan?.sector !== undefined ? { sector: room.plan.sector } : {}),
   }));
 
   const keys = new Set(nodes.map((n) => n.key));
@@ -358,5 +369,6 @@ export function blueprintFromDungeon(dungeon: Dungeon): Blueprint {
     }
   }
 
-  return { name: undefined, nodes, edges };
+  const radial = usable.some((room) => room.sector !== undefined);
+  return { name: undefined, ...(radial ? { layout: "radial" as const } : {}), nodes, edges };
 }

@@ -1,5 +1,9 @@
 import type { DungeonConfig } from "../ai/schema.ts";
 import type { GroundingProvenance } from "../ai/grounding-types.ts";
+import type { SectorGeometry } from "./sector.ts";
+
+/** Shape name for a room that is a slice of a ring; its geometry is `Room.sector`. */
+export const SECTOR_SHAPE = "Sector";
 
 export enum CellType {
   Empty = 0,
@@ -51,6 +55,10 @@ export interface RoomPlan {
   gating?: string[];
   /** Door preferences requested by blueprint edges; geometry may report them as unmet. */
   doorPreferences?: string[];
+  /** Radial plans only: 0 is the centre, 1 the first ring around it. */
+  ring?: number;
+  /** Radial plans only: order around the ring, clockwise from twelve o'clock. */
+  sector?: number;
 }
 
 export interface Cell {
@@ -74,6 +82,10 @@ export interface Room {
   /** Cell footprint created after a manual edit. Procedural rooms keep their
    * smooth shape until an edit actually changes their boundary. */
   footprint?: Array<{ x: number; y: number }>;
+  /** Present only on "Sector" rooms: the slice of a ring the room occupies. The
+   * bounding box above is derived from it, and centerX/centerY is a cell inside
+   * the slice rather than the middle of the box. */
+  sector?: SectorGeometry;
   description?: RoomDescription;
   /** Assigned by the layout-rules pass, not by the geometry generators. */
   role?: RoomRole;

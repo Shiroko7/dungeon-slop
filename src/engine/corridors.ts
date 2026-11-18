@@ -507,10 +507,31 @@ function carveBetween(
   id: number,
   style: DungeonConfig["corridors"],
   rng: SeededRandom,
+  wallToWall = false,
+  doorWidth = 1,
 ): Corridor | null {
   // Rooms that already touch need a door, not a hallway.
   if (roomsAdjoin(grid, a, b)) {
     return { id, roomA: a.id, roomB: b.id, path: [], width: 1 };
+  }
+
+  if (wallToWall) {
+    const doorway = facingDoorway(grid, a, b);
+    if (doorway !== null) {
+      let cells = widenDoorway(grid, a, b, doorway, doorWidth);
+      if (cells.length < doorWidth) {
+        // Where the wall curves the chosen cell may have no room beside it to
+        // widen into; take the nearest spot on the same wall that has.
+        const better = doorwayCells(grid, a, b)
+          .sort((p, q) => Math.hypot(p.x - doorway.x, p.y - doorway.y) - Math.hypot(q.x - doorway.x, q.y - doorway.y))
+          .map((p) => widenDoorway(grid, a, b, p, doorWidth))
+          .find((w) => w.length >= doorWidth);
+        if (better) cells = better;
+      }
+      return carveRoute(grid, cells, id, a, b);
+    }
+    const strict = planAround(grid, a, b, false);
+    return strict === null ? null : carveRoute(grid, strict, id, a, b);
   }
 
   if (style !== "Labyrinth") {
@@ -531,6 +552,118 @@ function carveBetween(
   return null;
 }
 
+/**
+ * A single cell with one room on each side of it, touching no third room.
+ *
+ * Where two rooms are built wall to wall this is the whole connection: a door in
+ * the wall. Preferring cells nearest the far room keeps the door near the middle
+ * of the shared wall rather than wherever the scan happened to start.
+ */
+function facingDoorway(grid: Cell[][], a: Room, b: Room): Point | null {
+  const doorways = doorwayCells(grid, a, b);
+  return doorways.length === 0 ? null : pickDoorway(grid, a, b, doorways);
+}
+
+/** Every cell with room a on one side and room b on the opposite side, touching no third room. */
+function doorwayCells(grid: Cell[][], a: Room, b: Room): Point[] {
+  return exitCells(grid, a, b).filter((cell) => {
+    const faces = DIRS.some(([dx, dy]) => {
+      const near = getCell(grid, cell.x + dx, cell.y + dy);
+      const far = getCell(grid, cell.x - dx, cell.y - dy);
+      return near?.roomId === a.id && far?.roomId === b.id;
+    });
+    return (
+      faces &&
+      !DIRS.some(([dx, dy]) => isThirdPartyRoomCell(grid, cell.x + dx, cell.y + dy, a.id, b.id))
+    );
+  });
+}
+
+function pickDoorway(grid: Cell[][], a: Room, b: Room, doorways: Point[]): Point {
+  // Not where the wall meets open rock: there the door's square pokes past a
+  // curved outline into the rock beyond.
+  const nearRock = (p: Point): boolean => {
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (getCell(grid, p.x + dx, p.y + dy)?.type === CellType.Empty) return true;
+      }
+    }
+    return false;
+  };
+  const inner = doorways.filter((p) => !nearRock(p));
+  const candidates = inner.length > 0 ? inner : doorways;
+  // A straight doorway has wall on both flanks. Where a curved wall runs
+  // diagonally the only doorways sit in a corner, with a room on two sides, and
+  // those draw as a skewed door with square notches beside it.
+  const straight = candidates.filter((p) =>
+    DIRS.some(([dx, dy]) => {
+      const near = getCell(grid, p.x + dx, p.y + dy);
+      const far = getCell(grid, p.x - dx, p.y - dy);
+      if (near?.roomId !== a.id || far?.roomId !== b.id) return false;
+      return (
+        getCell(grid, p.x + dy, p.y + dx)?.roomId == null &&
+        getCell(grid, p.x - dy, p.y - dx)?.roomId == null
+      );
+    }),
+  );
+  const pool = straight.length > 0 ? straight : candidates;
+  // The middle of the shared wall, not either end of it: a run of doors all
+  // hugging one corner reads as an accident of the scan.
+  const mx = pool.reduce((s, p) => s + p.x, 0) / pool.length;
+  const my = pool.reduce((s, p) => s + p.y, 0) / pool.length;
+  return pool.reduce((best, p) =>
+    Math.hypot(p.x - mx, p.y - my) < Math.hypot(best.x - mx, best.y - my) ? p : best,
+  );
+}
+
+/**
+ * The doorway cell plus up to `width - 1` cells beside it along the wall, each
+ * facing the same two rooms the same way and touching no third room. The first
+ * cell stays where facingDoorway put it, so widening never moves a door.
+ */
+function widenDoorway(grid: Cell[][], a: Room, b: Room, p: Point, width: number): Point[] {
+  const cells = [p];
+  if (width <= 1) return cells;
+  const dir = DIRS.find(([dx, dy]) =>
+    getCell(grid, p.x + dx, p.y + dy)?.roomId === a.id && getCell(grid, p.x - dx, p.y - dy)?.roomId === b.id,
+  );
+  if (!dir) return cells;
+  const [dx, dy] = dir;
+  const fits = (q: Point) => {
+    const cell = getCell(grid, q.x, q.y);
+    return (
+      cell !== undefined &&
+      cell.roomId === null &&
+      getCell(grid, q.x + dx, q.y + dy)?.roomId === a.id &&
+      getCell(grid, q.x - dx, q.y - dy)?.roomId === b.id &&
+      !DIRS.some(([ex, ey]) => isThirdPartyRoomCell(grid, q.x + ex, q.y + ey, a.id, b.id))
+    );
+  };
+  // Along the wall is perpendicular to the crossing direction; alternate sides.
+  for (let step = 1; cells.length < width && step <= width; step++) {
+    for (const s of [1, -1]) {
+      if (cells.length >= width) break;
+      const q = { x: p.x + s * step * dy, y: p.y + s * step * dx };
+      const prev = { x: p.x + s * (step - 1) * dy, y: p.y + s * (step - 1) * dx };
+      if (cells.some((c) => c.x === prev.x && c.y === prev.y) && fits(q)) cells.push(q);
+    }
+  }
+  return cells;
+}
+
+export interface CarveOptions {
+  /**
+   * The rooms are built wall to wall (a radial plan). Join them through one
+   * doorway cell where they face each other, and otherwise only by a route that
+   * keeps clear of every other room. A styled walk or a relaxed route may run
+   * along the inside of a shared wall, and every cell of that is an opening into
+   * whatever room lies on the far side.
+   */
+  wallToWall?: boolean;
+  /** wallToWall only: cells per doorway, along the shared wall (default 1). */
+  doorWidth?: number;
+}
+
 // ─── Main Entry ───────────────────────────────────────────────────────────────
 
 // Maximum fraction of a candidate corridor's path that may overlap with
@@ -548,6 +681,7 @@ export function carveCorridors(
    * room centres would throw away the only part the model was asked for.
    */
   explicitEdges?: Array<[number, number]>,
+  options: CarveOptions = {},
 ): Corridor[] {
   const { mst, extra } =
     explicitEdges === undefined
@@ -563,7 +697,7 @@ export function carveCorridors(
 
   /** Returns false when no room-free route exists; nothing is carved or recorded. */
   const carveEdge = (a: Room, b: Room): boolean => {
-    const corridor = carveBetween(grid, a, b, nextId, config.corridors, rng);
+    const corridor = carveBetween(grid, a, b, nextId, config.corridors, rng, options.wallToWall, options.doorWidth);
     if (corridor === null) return false;
     nextId++;
     corridors.push(corridor);

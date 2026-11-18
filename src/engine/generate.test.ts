@@ -1,5 +1,7 @@
 import { describe, test, expect } from "bun:test";
-import { generateDungeon } from "./generate.ts";
+import { generateDungeon, generateFromBlueprint } from "./generate.ts";
+import { normalizeBlueprint } from "../ai/blueprint.ts";
+import { radialPlans } from "./radial-fixtures.ts";
 import { CellType } from "./types.ts";
 import type { DungeonConfig, RoomShape } from "../ai/schema.ts";
 import { DEFAULT_CONFIG } from "../ai/schema.ts";
@@ -194,7 +196,8 @@ function emptyCorridorPaths(dungeon: ReturnType<typeof generateDungeon>): EmptyC
 
 // ─── 7. door boundary validity ────────────────────────────────────────────────
 // A Door cell must bridge a room and a corridor: adjacent to ≥1 cell with
-// roomId !== null AND ≥1 cell with corridorId !== null.
+// roomId !== null AND ≥1 cell with corridorId !== null — or, where two rooms are
+// built wall to wall, bridge two different rooms.
 // A SecretDoor must be a passage: adjacent to ≥2 walkable cells.
 
 interface InvalidDoor { x: number; y: number; type: string; issue: string }
@@ -216,7 +219,9 @@ function invalidDoors(dungeon: ReturnType<typeof generateDungeon>): InvalidDoor[
 
       if (cell.type === CellType.Door) {
         const hasRoomSide = neighbors.some(n => n != null && n.roomId !== null);
-        const hasCorridorSide = neighbors.some(n => n != null && n.corridorId !== null);
+        const roomIds = new Set(neighbors.map(n => n?.roomId).filter(id => id != null));
+        const hasCorridorSide =
+          neighbors.some(n => n != null && n.corridorId !== null) || roomIds.size >= 2;
         if (!hasRoomSide)    result.push({ x, y, type: "Door", issue: "no adjacent room cell" });
         if (!hasCorridorSide) result.push({ x, y, type: "Door", issue: "no adjacent corridor cell" });
       }
@@ -1048,6 +1053,70 @@ describe("dead ends — invariants", () => {
           generateDungeon({ ...BASE, corridors, seed }),
           `dead-ends Many ${corridors} seed=${seed}`,
         );
+      });
+    }
+  }
+});
+
+// ─── radial plans: rooms built wall to wall ───────────────────────────────────
+//
+// Every room shares a wall with its neighbours, so the usual gap between a
+// corridor and a room it does not serve is no longer a preference: a passage
+// cell touching a third room IS an opening into it.
+
+describe("radial plans — wall-to-wall invariants", () => {
+  const RADIAL_CONFIGS: Array<Partial<DungeonConfig>> = [
+    { seed: 1 },
+    { seed: 2, corridors: "Winding", door_types: ["Standard", "Secret"] },
+    { seed: 3, corridors: "Labyrinth", dead_ends: "Many", entry_points: "Many" },
+    { seed: 4, door_types: ["Open"] },
+  ];
+
+  for (const [label, plan] of radialPlans()) {
+    for (const over of RADIAL_CONFIGS) {
+      test(`${label} #${over.seed}`, () => {
+        const d = generateFromBlueprint(normalizeBlueprint(plan).blueprint, cfg(over));
+        assertAll(d, `${label} #${over.seed}`);
+
+        const problems: string[] = [];
+        const grid = d.grid;
+        const at = (x: number, y: number) => grid[y]?.[x];
+        for (let y = 0; y < d.height; y++) {
+          for (let x = 0; x < d.width; x++) {
+            const cell = at(x, y)!;
+            const around = [at(x - 1, y), at(x + 1, y), at(x, y - 1), at(x, y + 1)];
+            // Two rooms never share an edge: there is always wall between.
+            if (cell.type === CellType.Floor && cell.roomId !== null) {
+              for (const n of around) {
+                if (n?.type === CellType.Floor && n.roomId !== null && n.roomId !== cell.roomId) {
+                  problems.push(`rooms ${cell.roomId}/${n.roomId} touch at ${x},${y}`);
+                }
+              }
+            }
+            // A passage cell opens only into the rooms its corridor joins.
+            if (cell.corridorId !== null && cell.roomId === null) {
+              const corridor = d.corridors.find((c) => c.id === cell.corridorId);
+              for (const n of around) {
+                if (n?.roomId == null || n.type !== CellType.Floor) continue;
+                if (n.roomId !== corridor?.roomA && n.roomId !== corridor?.roomB) {
+                  problems.push(`passage ${x},${y} opens into room ${n.roomId}`);
+                }
+              }
+            }
+          }
+        }
+        // Nothing the plan did not ask for.
+        if (d.features.some((f) => f.type === "secret_door" && f.metadata === undefined && !over.door_types?.includes("Secret"))) {
+          problems.push("random secret door punched through a shared wall");
+        }
+        if (d.corridors.some((c) => c.roomA < 0 || c.roomB < 0)) problems.push("dead end or entry corridor added");
+        if (d.rooms.some((r) => r.role === "junction")) problems.push("junction room added");
+        // A room's centre cell is its own, so labels land inside it.
+        for (const room of d.rooms) {
+          if (at(room.centerX, room.centerY)?.roomId !== room.id) problems.push(`room ${room.id} centre outside it`);
+        }
+        expect(problems.slice(0, 5)).toEqual([]);
+        expect(d.report?.constraints?.unmetConnections).toEqual([]);
       });
     }
   }

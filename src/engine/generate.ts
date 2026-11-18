@@ -6,14 +6,16 @@ import { createGrid, getCell, setCellType, forEachCell, getNeighbors } from "./g
 import { generateBSP } from "./bsp.ts";
 import { placeFeatures, generateDeadEnds } from "./features.ts";
 import { carveShape } from "./shapes.ts";
+import { carveSector } from "./sector.ts";
 import { generateCellular } from "./cellular.ts";
 import { carveCorridors, carveEntryCorridors } from "./corridors.ts";
 import { planRoomBudget } from "./bsp.ts";
 import { assignRoles, enforceCorridorBudget, hasLoop } from "./layout-rules.ts";
 import { layoutBlueprint } from "./blueprint-layout.ts";
+import { applyEdgeDoors } from "./edge-doors.ts";
 import type { Blueprint } from "../ai/blueprint.ts";
 
-function blueprintConstraints(blueprint: Blueprint, rooms: Room[]) {
+function blueprintConstraints(blueprint: Blueprint, rooms: Room[], unmetRequirements: string[]) {
   const byKey = new Map(rooms.map((room) => [room.plan?.key, room]));
   const unmetConnections: Array<{ from: string; to: string }> = [];
   let deliveredConnections = 0;
@@ -60,11 +62,6 @@ function blueprintConstraints(blueprint: Blueprint, rooms: Room[]) {
   const unreachableRooms = planRooms
     .filter((room) => !reached.has(room.id))
     .map((room) => room.plan!.key);
-  const unmetRequirements: string[] = [];
-  for (const edge of blueprint.edges) {
-    if (edge.gating?.trim()) unmetRequirements.push(`Gate "${edge.gating}" is advisory; no lock mechanic is enforced by geometry.`);
-    if (edge.door?.trim()) unmetRequirements.push(`Door preference "${edge.door}" is advisory; the renderer does not bind a door type to a specific edge.`);
-  }
   return {
     requestedConnections: blueprint.edges.length,
     deliveredConnections,
@@ -79,7 +76,10 @@ function blueprintConstraints(blueprint: Blueprint, rooms: Room[]) {
 
 function carveRoomsIntoGrid(grid: Cell[][], rooms: Room[], rng: SeededRandom): void {
   for (const room of rooms) {
-    const cells = carveShape(room.shape, room.x, room.y, room.width, room.height, rng);
+    const cells =
+      room.sector !== undefined
+        ? carveSector(room.sector)
+        : carveShape(room.shape, room.x, room.y, room.width, room.height, rng);
     for (const key of cells) {
       const [xs, ys] = key.split(",");
       const x = Number(xs);
@@ -202,29 +202,39 @@ export function generateFromBlueprint(blueprint: Blueprint, config: DungeonConfi
   const { width, height } = layout;
   let rooms = layout.rooms;
 
+  // A radial plan builds its rooms wall to wall and IS the diagram: a door in
+  // each shared wall the plan joins, and nothing the plan did not ask for -
+  // no dead ends, no extra ways in, no junction rooms on long corridors.
+  const radial = blueprint.layout === "radial";
+
   const grid = createGrid(width, height);
   carveRoomsIntoGrid(grid, rooms, rng);
   buildWalls(grid);
 
-  const corridors = carveCorridors(grid, rooms, config, rng, layout.edges);
+  const corridors = carveCorridors(grid, rooms, config, rng, layout.edges, { wallToWall: radial, doorWidth: blueprint.doorWidth });
   buildWalls(grid);
 
-  const deadEnds = generateDeadEnds(grid, rooms, corridors, config, rng, corridors.length);
-  const entryCorridors = carveEntryCorridors(
-    grid,
-    rooms,
-    config,
-    rng,
-    corridors.length + deadEnds.length,
-  );
-  let allCorridors = [...corridors, ...deadEnds, ...entryCorridors];
+  let allCorridors = corridors;
+  let junctionsAdded = 0;
+  if (!radial) {
+    const deadEnds = generateDeadEnds(grid, rooms, corridors, config, rng, corridors.length);
+    const entryCorridors = carveEntryCorridors(
+      grid,
+      rooms,
+      config,
+      rng,
+      corridors.length + deadEnds.length,
+    );
+    allCorridors = [...corridors, ...deadEnds, ...entryCorridors];
 
-  const budgeted = enforceCorridorBudget(grid, rooms, allCorridors, rng);
-  rooms = budgeted.rooms;
-  allCorridors = budgeted.corridors;
+    const budgeted = enforceCorridorBudget(grid, rooms, allCorridors, rng);
+    rooms = budgeted.rooms;
+    allCorridors = budgeted.corridors;
+    junctionsAdded = budgeted.junctionsAdded;
+  }
 
   buildWalls(grid);
-  const features = placeFeatures(grid, rooms, allCorridors, config, rng);
+  const features = placeFeatures(grid, rooms, allCorridors, config, rng, { wallToWall: radial });
   buildWalls(grid);
 
   const dungeon: Dungeon = {
@@ -237,6 +247,7 @@ export function generateFromBlueprint(blueprint: Blueprint, config: DungeonConfi
     config: { ...config, grid_width: width, grid_height: height },
     seed,
   };
+  const unmetRequirements = applyEdgeDoors(dungeon, blueprint);
 
   // Junctions arrive without a tier because the plan never mentioned them.
   // Filling it in from their neighbours keeps depth continuous for the narrator.
@@ -261,10 +272,10 @@ export function generateFromBlueprint(blueprint: Blueprint, config: DungeonConfi
     requestedRooms: blueprint.nodes.length,
     deliveredRooms: rooms.filter((r) => r.role !== "junction").length,
     capacityRooms: blueprint.nodes.length,
-    junctionsAdded: budgeted.junctionsAdded,
+    junctionsAdded,
     longestCorridorCells: allCorridors.reduce((m, c) => Math.max(m, c.path.length), 0),
     hasLoop: hasLoop(rooms),
-    constraints: blueprintConstraints(blueprint, rooms),
+    constraints: blueprintConstraints(blueprint, rooms, unmetRequirements),
   };
 
   return dungeon;

@@ -42,6 +42,10 @@ export const BlueprintNodeSchema = z.object({
   notes: z.string().max(400).optional(),
   /** User-protected requirement; AI refinement must leave this node intact. */
   locked: z.boolean().optional(),
+  /** Radial plans only: 0 is the round room at the centre, 1 the ring around it. */
+  ring: z.number().int().min(0).max(3).optional(),
+  /** Radial plans only: order around the ring, clockwise from twelve o'clock. */
+  sector: z.number().int().min(0).max(39).optional(),
 });
 
 export const BlueprintEdgeSchema = z.object({
@@ -76,8 +80,28 @@ export const GroundingProvenanceSchema = z.object({
   retrievedAt: z.number().int().nonnegative(),
 });
 
+/**
+ * How the plan is laid out. "graph" places rooms freely by tier and wing;
+ * "radial" puts one round room at the centre and the rest in rings of slices
+ * around it, each slice sharing a wall with its neighbours.
+ */
+export const BlueprintLayoutEnum = z.enum(["graph", "radial"]);
+
 export const BlueprintSchema = z.object({
   name: z.string().max(120).optional(),
+  layout: BlueprintLayoutEnum.optional(),
+  /** Multiplies every room's size: 2 builds the same plan twice as big across. */
+  scale: z.number().min(0.5).max(4).optional(),
+  /**
+   * Radial only: cells of rock between neighbouring rooms (default 1.25). Wider
+   * gaps become channels crossed by short corridors instead of single doorways.
+   */
+  gap: z.number().min(1.25).max(8).optional(),
+  /**
+   * Radial only: how many cells wide each doorway between neighbouring rooms is
+   * (default 1). The extra cells run along the shared wall beside the first.
+   */
+  doorWidth: z.number().int().min(1).max(3).optional(),
   nodes: z.array(BlueprintNodeSchema).min(2).max(40),
   edges: z.array(BlueprintEdgeSchema),
   grounding: GroundingProvenanceSchema.optional(),
@@ -200,5 +224,53 @@ export function normalizeBlueprint(input: Blueprint): {
     problems.push({ severity: "repaired", message: `"${node.name}" was unreachable; joined to "${anchor.name}"` });
   }
 
-  return { blueprint: { name: input.name, nodes, edges, grounding: input.grounding }, problems };
+  if (input.layout === "radial") normalizeRings(nodes, entrances[0]!, problems);
+
+  return {
+    blueprint: {
+      name: input.name,
+      ...(input.layout !== undefined ? { layout: input.layout } : {}),
+      ...(input.scale !== undefined ? { scale: input.scale } : {}),
+      ...(input.gap !== undefined ? { gap: input.gap } : {}),
+      ...(input.doorWidth !== undefined ? { doorWidth: input.doorWidth } : {}),
+      nodes,
+      edges,
+      grounding: input.grounding,
+    },
+    problems,
+  };
+}
+
+/**
+ * Make a radial plan buildable: exactly one centre room, and rings numbered
+ * 1..n without gaps. A slice alone in an outer ring is moved inward, since one
+ * slice cannot close a ring; alone in the first ring it is built as a half ring.
+ */
+function normalizeRings(nodes: BlueprintNode[], entrance: BlueprintNode, problems: BlueprintProblem[]): void {
+  const centres = nodes.filter((n) => n.ring === 0);
+  if (centres.length === 0) {
+    const centre = nodes.find((n) => n.role === "hub") ?? entrance;
+    centre.ring = 0;
+    problems.push({ severity: "repaired", message: `No centre room declared; "${centre.name}" placed at the centre` });
+  } else if (centres.length > 1) {
+    for (const extra of centres.slice(1)) extra.ring = 1;
+    problems.push({ severity: "repaired", message: `${centres.length} centre rooms declared; kept "${centres[0]!.name}"` });
+  }
+  for (const node of nodes) node.ring ??= 1;
+
+  const renumber = () => {
+    const used = [...new Set(nodes.map((n) => n.ring!).filter((r) => r > 0))].sort((a, b) => a - b);
+    for (const node of nodes) if (node.ring! > 0) node.ring = used.indexOf(node.ring!) + 1;
+    return used.length;
+  };
+
+  const rings = renumber();
+  for (let ring = rings; ring >= 2; ring--) {
+    const members = nodes.filter((n) => n.ring === ring);
+    if (members.length !== 1) continue;
+    const lone = members[0]!;
+    lone.ring = ring - 1;
+    problems.push({ severity: "repaired", message: `"${lone.name}" was alone in ring ${ring}; moved into ring ${ring - 1}` });
+  }
+  renumber();
 }

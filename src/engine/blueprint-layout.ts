@@ -1,6 +1,8 @@
 import type { Blueprint, BlueprintNode } from "../ai/blueprint.ts";
 import type { DungeonConfig, RoomShape } from "../ai/schema.ts";
-import type { Room } from "./types.ts";
+import type { Room, RoomPlan } from "./types.ts";
+import { SECTOR_SHAPE } from "./types.ts";
+import { carveSector, sectorAnchorCell, sectorBounds, type SectorGeometry } from "./sector.ts";
 import { ROOM_SIZE_CELLS } from "./bsp.ts";
 import type { SeededRandom } from "../lib/random.ts";
 
@@ -56,7 +58,7 @@ function pickShape(node: BlueprintNode, config: DungeonConfig, size: number, rng
   return pool[rng.nextInt(0, pool.length - 1)] ?? "Rectangular";
 }
 
-function roomSize(node: BlueprintNode, rng: SeededRandom): { width: number; height: number } {
+function roomSize(node: BlueprintNode, rng: SeededRandom, scale: number): { width: number; height: number } {
   const range = ROOM_SIZE_CELLS[node.size] ?? ROOM_SIZE_CELLS["Medium"]!;
   // Roles carry weight: a boss room should read as the biggest thing on the
   // map, a hub has to hold the traffic of everything hanging off it, and a
@@ -64,7 +66,7 @@ function roomSize(node: BlueprintNode, rng: SeededRandom): { width: number; heig
   const bias =
     node.role === "boss" ? 1.25 : node.role === "hub" ? 1.15 : node.role === "chokepoint" ? 0.8 : 1;
   const base = rng.nextInt(range.min, range.max);
-  const scaled = Math.max(3, Math.round(base * bias));
+  const scaled = Math.max(3, Math.round(base * bias * scale));
   const jitter = rng.nextInt(-1, 1);
   return { width: scaled, height: Math.max(3, scaled + jitter) };
 }
@@ -83,7 +85,7 @@ export function gridForBlueprint(
   let area = 0;
   for (const node of blueprint.nodes) {
     const range = ROOM_SIZE_CELLS[node.size] ?? ROOM_SIZE_CELLS["Medium"]!;
-    const mid = (range.min + range.max) / 2;
+    const mid = ((range.min + range.max) / 2) * (blueprint.scale ?? 1);
     area += (mid + ROOM_GAP) ** 2;
   }
   const side = Math.ceil(Math.sqrt(area / 0.30));
@@ -129,7 +131,7 @@ function seedPositions(
     const anchorY = usableBottom - t * (usableBottom - usableTop);
 
     nodes.forEach((node, i) => {
-      const size = roomSize(node, rng);
+      const size = roomSize(node, rng, blueprint.scale ?? 1);
       const centre =
         node.wing !== undefined && wingCentre.has(node.wing)
           ? wingCentre.get(node.wing)!
@@ -268,39 +270,15 @@ export function layoutBlueprint(
   config: DungeonConfig,
   rng: SeededRandom,
 ): BlueprintLayout {
+  if (blueprint.layout === "radial") return layoutRadial(blueprint);
   const { width, height } = gridForBlueprint(blueprint, config);
   const placed = seedPositions(blueprint, width, height, rng);
 
-  const indexByKey = new Map(placed.map((p, i) => [p.node.key, i]));
-  const edges: Array<[number, number]> = [];
-  for (const edge of blueprint.edges) {
-    const a = indexByKey.get(edge.from);
-    const b = indexByKey.get(edge.to);
-    if (a === undefined || b === undefined || a === b) continue;
-    edges.push([a, b]);
-  }
+  const edges = resolveEdges(blueprint, placed.map((p) => p.node));
 
   relax(placed, edges, width, height);
   separateIntegers(placed, width, height);
-
-  const gatingByKey = new Map<string, string[]>();
-  const doorByKey = new Map<string, string[]>();
-  for (const edge of blueprint.edges) {
-    if (edge.gating !== undefined && edge.gating.trim().length > 0) {
-      for (const key of [edge.from, edge.to]) {
-        const list = gatingByKey.get(key);
-        if (list === undefined) gatingByKey.set(key, [edge.gating]);
-        else list.push(edge.gating);
-      }
-    }
-    if (edge.door !== undefined && edge.door.trim() !== "") {
-      for (const key of [edge.from, edge.to]) {
-        const list = doorByKey.get(key);
-        if (list === undefined) doorByKey.set(key, [edge.door]);
-        else if (!list.includes(edge.door)) list.push(edge.door);
-      }
-    }
-  }
+  const planFor = planBuilder(blueprint);
 
   const rooms: Room[] = placed.map((p, id) => {
     const size = Math.min(p.width, p.height);
@@ -326,17 +304,184 @@ export function layoutBlueprint(
       features: [],
       role: p.node.role,
       tier: p.node.tier,
-      plan: {
-        key: p.node.key,
-        name: p.node.name,
-        locked: p.node.locked,
-        wing: p.node.wing,
-        notes: p.node.notes,
-        gating: gatingByKey.get(p.node.key),
-        doorPreferences: doorByKey.get(p.node.key),
-      },
+      plan: planFor(p.node),
     };
   });
 
   return { rooms, edges, width, height };
+}
+
+/** Blueprint edges as pairs of indexes into `nodes`. */
+function resolveEdges(blueprint: Blueprint, nodes: BlueprintNode[]): Array<[number, number]> {
+  const indexByKey = new Map(nodes.map((n, i) => [n.key, i]));
+  const edges: Array<[number, number]> = [];
+  for (const edge of blueprint.edges) {
+    const a = indexByKey.get(edge.from);
+    const b = indexByKey.get(edge.to);
+    if (a === undefined || b === undefined || a === b) continue;
+    edges.push([a, b]);
+  }
+  return edges;
+}
+
+/** What each room carries forward from the plan for the narrator and the editor. */
+function planBuilder(blueprint: Blueprint): (node: BlueprintNode) => RoomPlan {
+  const gatingByKey = new Map<string, string[]>();
+  const doorByKey = new Map<string, string[]>();
+  for (const edge of blueprint.edges) {
+    if (edge.gating !== undefined && edge.gating.trim().length > 0) {
+      for (const key of [edge.from, edge.to]) {
+        const list = gatingByKey.get(key);
+        if (list === undefined) gatingByKey.set(key, [edge.gating]);
+        else list.push(edge.gating);
+      }
+    }
+    if (edge.door !== undefined && edge.door.trim() !== "") {
+      for (const key of [edge.from, edge.to]) {
+        const list = doorByKey.get(key);
+        if (list === undefined) doorByKey.set(key, [edge.door]);
+        else if (!list.includes(edge.door)) list.push(edge.door);
+      }
+    }
+  }
+
+  return (node) => ({
+    key: node.key,
+    name: node.name,
+    locked: node.locked,
+    wing: node.wing,
+    notes: node.notes,
+    gating: gatingByKey.get(node.key),
+    doorPreferences: doorByKey.get(node.key),
+    ...(node.ring !== undefined ? { ring: node.ring } : {}),
+    ...(node.sector !== undefined ? { sector: node.sector } : {}),
+  });
+}
+
+// ─── Radial layout ────────────────────────────────────────────────────────────
+//
+// One round room at the centre, every other room a slice of a ring around it.
+// Nothing here is solved or relaxed: the plan says which ring and which slot,
+// and the geometry follows from that exactly, so the map is the diagram.
+//
+// The centre sits on a cell CENTRE and every gap is 1.25 cells. Between them
+// those two numbers guarantee what the doors need: neighbouring rooms never
+// share an edge (a gap over one cell), yet almost everywhere along a shared wall
+// there is a single cell with one room on each side of it (a gap under 1.41,
+// the most that two steps across a cell can span on a diagonal).
+
+/** Default rock between a ring and whatever lies inside it, and between two slices. */
+const DEFAULT_GAP = 1.25;
+/** Clear space outside the outermost ring, for corridors that go round. */
+const RADIAL_MARGIN = 6;
+/** Narrowest a slice may be along its inner wall, in cells. */
+const MIN_SLICE_WIDTH = 4;
+
+function midSize(size: string): number {
+  const range = ROOM_SIZE_CELLS[size] ?? ROOM_SIZE_CELLS["Medium"]!;
+  return (range.min + range.max) / 2;
+}
+
+function layoutRadial(blueprint: Blueprint): BlueprintLayout {
+  const nodes = blueprint.nodes;
+  // A plan may widen the gaps into channels; past 1.41 no single cell spans
+  // them, and the corridor carver routes a short passage across instead.
+  const RING_GAP = blueprint.gap ?? DEFAULT_GAP;
+  const SLICE_GAP = blueprint.gap ?? DEFAULT_GAP;
+  const centre = nodes.find((n) => n.ring === 0) ?? nodes[0]!;
+  const ringNumbers = [...new Set(nodes.filter((n) => n !== centre).map((n) => n.ring ?? 1))].sort(
+    (a, b) => a - b,
+  );
+  const rings = ringNumbers.map((ring) =>
+    nodes
+      .map((node, index) => ({ node, index }))
+      .filter(({ node }) => node !== centre && (node.ring ?? 1) === ring)
+      // Explicit slots first, in slot order; anything unnumbered keeps plan order.
+      .sort(
+        (a, b) =>
+          (a.node.sector ?? Number.MAX_SAFE_INTEGER) - (b.node.sector ?? Number.MAX_SAFE_INTEGER) ||
+          a.index - b.index,
+      )
+      .map(({ node }) => node),
+  );
+
+  // An odd diameter puts the centre of the room on the centre of a cell.
+  const scale = blueprint.scale ?? 1;
+  let diameter = Math.max(7, 2 * Math.round((midSize(centre.size) * scale) / 2) + 1);
+  const firstRing = rings[0]?.length ?? 0;
+  while (firstRing > 0 && (2 * Math.PI * (diameter / 2 + RING_GAP)) / firstRing - SLICE_GAP < MIN_SLICE_WIDTH) {
+    diameter += 2;
+  }
+  const hubRadius = diameter / 2;
+
+  const bands: Array<{ inner: number; outer: number }> = [];
+  let edge = hubRadius;
+  for (const members of rings) {
+    const depth = Math.max(4, Math.round(Math.max(...members.map((n) => midSize(n.size))) * 0.7 * scale));
+    const inner = edge + RING_GAP;
+    bands.push({ inner, outer: inner + depth });
+    edge = inner + depth;
+  }
+
+  const side = Math.max(20, Math.ceil(2 * edge) + 2 * RADIAL_MARGIN);
+  const cx = Math.floor(side / 2) + 0.5;
+  const cy = cx;
+  const planFor = planBuilder(blueprint);
+
+  const ordered: BlueprintNode[] = [centre, ...rings.flat()];
+  const rooms: Room[] = [];
+
+  const hubX = cx - hubRadius;
+  const hubY = cy - hubRadius;
+  rooms.push({
+    id: 0,
+    x: hubX,
+    y: hubY,
+    width: diameter,
+    height: diameter,
+    centerX: hubX + Math.floor(diameter / 2),
+    centerY: hubY + Math.floor(diameter / 2),
+    shape: "Circular",
+    connections: [],
+    features: [],
+    role: centre.role,
+    tier: centre.tier,
+    plan: planFor(centre),
+  });
+
+  rings.forEach((members, ringIndex) => {
+    const band = bands[ringIndex]!;
+    // A lone slice takes half a turn: the walls of anything wider stop
+    // bounding a wedge.
+    const span = members.length === 1 ? Math.PI : (2 * Math.PI) / members.length;
+    members.forEach((node, slot) => {
+      const startAngle = -Math.PI / 2 + slot * span;
+      const sector: SectorGeometry = {
+        cx,
+        cy,
+        innerRadius: band.inner,
+        outerRadius: band.outer,
+        startAngle,
+        endAngle: startAngle + span,
+        inset: SLICE_GAP / 2,
+      };
+      const bounds = sectorBounds(sector);
+      const anchor = sectorAnchorCell(sector, carveSector(sector));
+      rooms.push({
+        id: rooms.length,
+        ...bounds,
+        centerX: anchor.x,
+        centerY: anchor.y,
+        shape: SECTOR_SHAPE,
+        sector,
+        connections: [],
+        features: [],
+        role: node.role,
+        tier: node.tier,
+        plan: planFor(node),
+      });
+    });
+  });
+
+  return { rooms, edges: resolveEdges(blueprint, ordered), width: side, height: side };
 }

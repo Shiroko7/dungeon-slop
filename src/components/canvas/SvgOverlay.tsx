@@ -36,9 +36,12 @@ function CorridorLabel({ corridor, grid, cellSize }: { corridor: Corridor; grid:
   // Fall back to the full path if every cell was reverted (corridor fully collapsed).
   const labelPath = corridorOnly.length > 0 ? corridorOnly : path;
   if (labelPath.length === 0) return null;
-  const mid = labelPath[Math.floor(labelPath.length / 2)]!;
-  const cx = mid.x * cellSize + cellSize / 2;
-  const cy = mid.y * cellSize + cellSize / 2;
+  // The middle of the passage: with an even number of cells (a two-cell wide
+  // doorway, say) that is between the two middle cells, not on either one.
+  const hi = labelPath[Math.floor(labelPath.length / 2)]!;
+  const lo = labelPath[Math.ceil(labelPath.length / 2) - 1]!;
+  const cx = ((lo.x + hi.x) / 2) * cellSize + cellSize / 2;
+  const cy = ((lo.y + hi.y) / 2) * cellSize + cellSize / 2;
   const r = cellSize * 0.44;
   const fontSize = cellSize * 0.52;
   const label = corridorLabel(corridor.id);

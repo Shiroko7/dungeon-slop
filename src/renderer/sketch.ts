@@ -3,6 +3,7 @@ import type { Cell, Dungeon, Room } from "../engine/types.ts";
 import { CellType, isCaveShape } from "../engine/types.ts";
 import type { ThemePalette } from "./themes/theme-engine.ts";
 import { getRoomGeometry, crossOutlineVertices } from "./room-shapes.ts";
+import { sectorOutline } from "../engine/sector.ts";
 import PolyBool from "polybooljs";
 
 // ─── Light-sketch wall rendering ─────────────────────────────────────────────
@@ -190,6 +191,8 @@ function sampleRoomOutline(room: Room): Pt[] {
       return subdivide(closeRing(geo.vertices ?? []), 0.6);
     case "path":
       return subdivide(closeRing(crossOutlineVertices(room, 1)), 0.6);
+    case "sector":
+      return subdivide(closeRing(sectorOutline(geo.sector!, 0.6)), 0.6);
     case "rect":
     default: {
       const { x, y, width: w, height: h } = geo.bounds;

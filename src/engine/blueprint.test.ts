@@ -4,6 +4,8 @@ import { normalizeBlueprint, type Blueprint } from "../ai/blueprint.ts";
 import { applyRefineOps, blueprintFromDungeon, type RefineOp } from "./refine-ops.ts";
 import { MAX_CORRIDOR_CELLS } from "./layout-rules.ts";
 import { DEFAULT_CONFIG } from "../ai/schema.ts";
+import { CellType, FeatureType } from "./types.ts";
+import { moonCycle, ringOf } from "./radial-fixtures.ts";
 
 /** A small plan with a hub, two wings, a gate and a loop. */
 function plan(): Blueprint {
@@ -139,7 +141,7 @@ describe("a blueprint becomes the map it describes", () => {
     expect(warden.plan?.gating).toContain("the Forge key");
   });
 
-  test("constraint report distinguishes delivered graph from advisory requirements", () => {
+  test("constraint report distinguishes delivered graph from unmet requirements", () => {
     expect(dungeon.report?.constraints?.requestedConnections).toBeGreaterThan(0);
     expect(dungeon.report?.constraints?.deliveredConnections).toBe(
       dungeon.report?.constraints?.requestedConnections,
@@ -147,7 +149,18 @@ describe("a blueprint becomes the map it describes", () => {
     expect(dungeon.report?.constraints?.unmetConnections).toHaveLength(0);
     expect(dungeon.report?.constraints?.reachableRooms).toBe(plan().nodes.length);
     expect(dungeon.report?.constraints?.unreachableRooms).toHaveLength(0);
-    expect(dungeon.report?.constraints?.unmetRequirements.some((item) => item.includes("Forge key"))).toBe(true);
+    expect(dungeon.report?.constraints?.unmetRequirements).toEqual([]);
+  });
+
+  test("a gated edge gets a locked door on the gated side", () => {
+    const warden = real.find((r) => r.plan?.key === "warden")!;
+    const gate = dungeon.features.find((f) => f.metadata?.gating === "the Forge key");
+    expect(gate?.type).toBe(FeatureType.LockedDoor);
+    const touchesWarden = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).some(
+      ([dx, dy]) => dungeon.grid[gate!.y + dy]?.[gate!.x + dx]?.roomId === warden.id,
+    );
+    expect(touchesWarden).toBe(true);
+    expect(dungeon.grid[gate!.y]![gate!.x]!.type).toBe(CellType.Door);
   });
 
   test("corridors stay inside budget", () => {
@@ -272,5 +285,122 @@ describe("refine ops", () => {
     const built = generateFromBlueprint(normalizeBlueprint(blueprint).blueprint, config);
     expect(built.rooms.filter((r) => r.role !== "junction").length).toBe(9);
     expect(built.report!.deliveredRooms).toBe(9);
+  });
+});
+
+describe("radial plans", () => {
+  test("doorWidth widens each doorway in place: one door feature spanning the cells", () => {
+    const narrow = generateFromBlueprint(normalizeBlueprint(moonCycle()).blueprint, { ...DEFAULT_CONFIG, seed: 1 });
+    const wide = generateFromBlueprint(normalizeBlueprint({ ...moonCycle(), doorWidth: 2 }).blueprint, { ...DEFAULT_CONFIG, seed: 1 });
+    expect(wide.report!.constraints!.deliveredConnections).toBe(wide.report!.constraints!.requestedConnections);
+    expect(wide.rooms.map((r) => [r.x, r.y, r.width, r.height])).toEqual(narrow.rooms.map((r) => [r.x, r.y, r.width, r.height]));
+    const cellsOf = (d: typeof wide, id: number) => d.grid.flat().filter((c) => c.featureId === id).length;
+    const doors = (d: typeof wide) => d.features.filter((f) => f.type === FeatureType.Door || f.type === FeatureType.Portcullis);
+    expect(doors(wide)).toHaveLength(doors(narrow).length);
+    for (const f of doors(wide)) expect(cellsOf(wide, f.id)).toBe(2);
+    for (const f of doors(narrow)) expect(cellsOf(narrow, f.id)).toBe(1);
+  });
+
+  test("a wider gap makes channels crossed by short corridors, every edge still joined", () => {
+    for (const plan of [moonCycle(), ringOf(5)]) {
+      const wide = generateFromBlueprint(normalizeBlueprint({ ...plan, gap: 2.5 }).blueprint, { ...DEFAULT_CONFIG, seed: 3 });
+      const c = wide.report!.constraints!;
+      expect(c.deliveredConnections).toBe(c.requestedConnections);
+      const crossings = wide.corridors.filter((c) => c.path.length > 1);
+      expect(crossings.length).toBeGreaterThan(0);
+      // Neighbouring rooms no longer touch through a single cell.
+      expect(wide.corridors.every((c) => c.path.length >= 2 || c.roomA < 0 || c.roomB < 0)).toBe(true);
+    }
+    expect(normalizeBlueprint({ ...moonCycle(), gap: 3 }).blueprint.gap).toBe(3);
+  });
+
+  test("normalization keeps the layout and gives every room a ring", () => {
+    const input = moonCycle();
+    for (const node of input.nodes) delete node.ring;
+    const { blueprint, problems } = normalizeBlueprint(input);
+    expect(blueprint.layout).toBe("radial");
+    expect(blueprint.nodes.filter((n) => n.ring === 0).map((n) => n.key)).toEqual(["vigil"]);
+    expect(blueprint.nodes.filter((n) => n.ring === 1)).toHaveLength(4);
+    expect(problems.some((p) => p.message.includes("centre"))).toBe(true);
+  });
+
+  test("a second centre room and a lone outer slice are repaired", () => {
+    const input = ringOf(4);
+    input.nodes[1]!.ring = 0;
+    input.nodes[2]!.ring = 3;
+    const { blueprint } = normalizeBlueprint(input);
+    expect(blueprint.nodes.filter((n) => n.ring === 0)).toHaveLength(1);
+    expect(blueprint.nodes.every((n) => n.ring === 0 || n.ring === 1)).toBe(true);
+  });
+
+  const moon = generateFromBlueprint(normalizeBlueprint(moonCycle()).blueprint, { ...DEFAULT_CONFIG, seed: 1 });
+  const byKey = (key: string) => moon.rooms.find((r) => r.plan?.key === key)!;
+
+  test("the centre is round and the rest are slices, clockwise from twelve", () => {
+    expect(byKey("vigil").shape).toBe("Circular");
+    const slices = ["unveiling", "shards", "table", "cradle"].map(byKey);
+    expect(slices.every((r) => r.shape === "Sector" && r.sector !== undefined)).toBe(true);
+    const [ne, se, sw, nw] = slices;
+    const c = byKey("vigil");
+    expect(ne!.centerX > c.centerX && ne!.centerY < c.centerY).toBe(true);
+    expect(se!.centerX > c.centerX && se!.centerY > c.centerY).toBe(true);
+    expect(sw!.centerX < c.centerX && sw!.centerY > c.centerY).toBe(true);
+    expect(nw!.centerX < c.centerX && nw!.centerY < c.centerY).toBe(true);
+  });
+
+  test("each planned edge is one door in a shared wall", () => {
+    for (const edge of moonCycle().edges) {
+      const a = byKey(edge.from);
+      const b = byKey(edge.to);
+      const corridor = moon.corridors.find(
+        (c) => (c.roomA === a.id && c.roomB === b.id) || (c.roomA === b.id && c.roomB === a.id),
+      );
+      expect(corridor?.path).toHaveLength(1);
+    }
+    // The Cradle touches three rooms but the plan joins it only to the centre.
+    expect(byKey("cradle").connections).toEqual([byKey("vigil").id]);
+  });
+
+  test("door types and gates land on the edges that asked for them", () => {
+    const portcullis = moon.features.find((f) => f.metadata?.edge === "vigil -> unveiling");
+    expect(portcullis?.type).toBe(FeatureType.Portcullis);
+    const seal = moon.features.find((f) => f.metadata?.edge === "vigil -> cradle");
+    expect(seal?.type).toBe(FeatureType.LockedDoor);
+    expect(seal?.metadata?.gating).toBe("all four phases of the moon");
+    expect(moon.report?.constraints?.unmetRequirements).toEqual([]);
+  });
+
+  test("an unknown door type is drawn as a door and reported", () => {
+    const input = moonCycle();
+    input.edges[1]!.door = "moonlight";
+    const d = generateFromBlueprint(normalizeBlueprint(input).blueprint, { ...DEFAULT_CONFIG, seed: 1 });
+    expect(d.report?.constraints?.unmetRequirements.some((m) => m.includes("moonlight"))).toBe(true);
+    expect(d.features.find((f) => f.metadata?.edge === "unveiling -> shards")?.type).toBe(FeatureType.Door);
+  });
+
+  test("an Open door preference leaves a bare doorway", () => {
+    const input = moonCycle();
+    input.edges[1]!.door = "Open";
+    const d = generateFromBlueprint(normalizeBlueprint(input).blueprint, { ...DEFAULT_CONFIG, seed: 1 });
+    const a = d.rooms.find((r) => r.plan?.key === "unveiling")!;
+    const b = d.rooms.find((r) => r.plan?.key === "shards")!;
+    const corridor = d.corridors.find((c) => c.roomA === a.id && c.roomB === b.id)!;
+    const cell = d.grid[corridor.path[0]!.y]![corridor.path[0]!.x]!;
+    expect(cell.type).toBe(CellType.Corridor);
+    expect(cell.featureId).toBeNull();
+  });
+
+  test("scale 2 builds the same plan twice as big across", () => {
+    const big = generateFromBlueprint(normalizeBlueprint({ ...moonCycle(), scale: 2 }).blueprint, { ...DEFAULT_CONFIG, seed: 1 });
+    const outer = (d: typeof moon) => d.rooms.find((r) => r.sector !== undefined)!.sector!.outerRadius;
+    expect(outer(big) / outer(moon)).toBeGreaterThan(1.8);
+    expect(outer(big) / outer(moon)).toBeLessThan(2.2);
+    expect(big.report?.constraints?.unmetConnections).toEqual([]);
+    expect(normalizeBlueprint({ ...moonCycle(), scale: 2 }).blueprint.scale).toBe(2);
+  });
+
+  test("the same plan and seed build the same map", () => {
+    const again = generateFromBlueprint(normalizeBlueprint(moonCycle()).blueprint, { ...DEFAULT_CONFIG, seed: 1 });
+    expect(JSON.stringify(again.grid)).toBe(JSON.stringify(moon.grid));
   });
 });

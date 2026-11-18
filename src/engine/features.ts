@@ -63,19 +63,30 @@ function computeRoomSills(grid: Cell[][], room: Room): Sill[] {
   return sills;
 }
 
+/**
+ * The feature a door type names: null for "Open" (a doorway with no door),
+ * undefined for a name this does not recognise. Case-insensitive, because plan
+ * edges carry door types as free text.
+ */
+export function doorFeatureFor(name: string): FeatureType | null | undefined {
+  switch (name.trim().toLowerCase()) {
+    case "open":       return null;
+    case "archway":    return FeatureType.Archway;
+    case "portcullis": return FeatureType.Portcullis;
+    case "locked":     return FeatureType.LockedDoor;
+    case "secure":     return FeatureType.LockedDoor;
+    case "trapped":    return FeatureType.TrappedDoor;
+    case "secret":     return FeatureType.SecretDoor;
+    case "standard":   return FeatureType.Door;
+    default:           return undefined;
+  }
+}
+
 // Returns null for "Open" (no door feature placed at this sill).
 function resolveDoorType(doorTypes: string[], rng: SeededRandom): FeatureType | null {
   const pick = doorTypes[rng.nextInt(0, doorTypes.length - 1)]!;
-  switch (pick) {
-    case "Open":      return null;
-    case "Archway":   return FeatureType.Archway;
-    case "Portcullis": return FeatureType.Portcullis;
-    case "Locked":    return FeatureType.LockedDoor;
-    case "Secure":    return FeatureType.LockedDoor;
-    case "Trapped":   return FeatureType.TrappedDoor;
-    case "Secret":    return FeatureType.SecretDoor;
-    default:          return FeatureType.Door; // "Standard"
-  }
+  const feature = doorFeatureFor(pick);
+  return feature === undefined ? FeatureType.Door : feature;
 }
 
 function placeDoors(
@@ -84,6 +95,8 @@ function placeDoors(
   config: DungeonConfig,
   rng: SeededRandom,
   featureId: { value: number },
+  /** Wall-to-wall plans: doorways between two rooms are left to placeDoorways. */
+  skipDoorways = false,
 ): Feature[] {
   const features: Feature[] = [];
 
@@ -111,11 +124,19 @@ function placeDoors(
     const adjacentRoom = neighbors.some(
       (n) => n.cell.type === CellType.Floor && n.cell.roomId !== null,
     );
-    // Mirror the invalidDoors invariant exactly: door needs a neighbor with corridorId set
+    // A sill door needs a corridor running on past it (invalidDoors in the tests);
+    // single-cell passages between two rooms are placeDoorways' job.
     const hasCorridorNeighbor = neighbors.some((n) => n.cell.corridorId !== null);
+    // A cell with a different room on each side is a doorway between them (two
+    // side by side in a wide one); placeDoorways gives it one shared door.
+    const betweenRooms = skipDoorways && [[1, 0], [0, 1]].some(([dx, dy]) => {
+      const p = getCell(grid, sill.x + dx!, sill.y + dy!)?.roomId ?? null;
+      const q = getCell(grid, sill.x - dx!, sill.y - dy!)?.roomId ?? null;
+      return p !== null && q !== null && p !== q;
+    });
 
     // Place door at the corridor entry cell that bridges room and corridor path
-    if (isCorridor && adjacentRoom && hasCorridorNeighbor) {
+    if (isCorridor && adjacentRoom && hasCorridorNeighbor && !betweenRooms) {
       placed.add(key);
 
       const doorType = resolveDoorType(config.door_types, rng);
@@ -133,6 +154,67 @@ function placeDoors(
     }
   }
 
+  return features;
+}
+
+/**
+ * Doors where a corridor meets the rooms it joins and no sill pass put one.
+ *
+ * The sill pass only looks at the ring just outside a room's bounding box, and
+ * only at a corridor that runs on past the sill. Neither holds for rooms built
+ * wall to wall: their passage is a single cell, often deep inside the other
+ * room's box, with a room on both sides and no corridor beyond it.
+ */
+/** A cell with one of the corridor's rooms on each side: part of a wall-to-wall doorway. */
+function isDoorwayCell(grid: Cell[][], pos: { x: number; y: number }, corridor: Corridor): boolean {
+  return [[1, 0], [0, 1]].some(([dx, dy]) => {
+    const p = getCell(grid, pos.x + dx!, pos.y + dy!)?.roomId;
+    const q = getCell(grid, pos.x - dx!, pos.y - dy!)?.roomId;
+    return (p === corridor.roomA && q === corridor.roomB) || (p === corridor.roomB && q === corridor.roomA);
+  });
+}
+
+function placeDoorways(
+  grid: Cell[][],
+  corridors: Corridor[],
+  config: DungeonConfig,
+  rng: SeededRandom,
+  featureId: { value: number },
+): Feature[] {
+  const features: Feature[] = [];
+  if (config.door_types.every((t) => t === "Open")) return features;
+
+  for (const corridor of corridors) {
+    if (corridor.roomA < 0 || corridor.roomB < 0) continue;
+    // A wide doorway (several side-by-side cells) is one door: the renderer
+    // draws all cells of a feature as a single wide symbol.
+    let last: { feature: Feature; x: number; y: number } | null = null;
+    for (const pos of corridor.path) {
+      const cell = getCell(grid, pos.x, pos.y);
+      if (cell === undefined || cell.type !== CellType.Corridor || cell.featureId !== null) continue;
+      const touchesEnd = getNeighbors(grid, pos.x, pos.y).some(
+        (n) =>
+          n.cell.type === CellType.Floor &&
+          (n.cell.roomId === corridor.roomA || n.cell.roomId === corridor.roomB),
+      );
+      if (!touchesEnd) continue;
+
+      const besideLast = last !== null && Math.abs(last.x - pos.x) + Math.abs(last.y - pos.y) === 1 && isDoorwayCell(grid, pos, corridor);
+      if (besideLast && last) {
+        cell.featureId = last.feature.id;
+        cell.type = last.feature.type === FeatureType.SecretDoor ? CellType.SecretDoor : CellType.Door;
+        last = { feature: last.feature, x: pos.x, y: pos.y };
+        continue;
+      }
+      const doorType = resolveDoorType(config.door_types, rng);
+      if (doorType === null) continue;
+      const feature: Feature = { id: featureId.value++, type: doorType, x: pos.x, y: pos.y };
+      features.push(feature);
+      cell.featureId = feature.id;
+      cell.type = doorType === FeatureType.SecretDoor ? CellType.SecretDoor : CellType.Door;
+      last = isDoorwayCell(grid, pos, corridor) ? { feature, x: pos.x, y: pos.y } : null;
+    }
+  }
   return features;
 }
 
@@ -722,22 +804,37 @@ export function generateDeadEnds(
 // Main entry point
 // ============================================================
 
+export interface FeatureOptions {
+  /**
+   * Rooms are built wall to wall (a radial plan). Their single-cell passages get
+   * doors, and no secret doors are punched at random: with a one-cell wall
+   * between every pair of neighbours, each one would be a connection the plan
+   * never asked for.
+   */
+  wallToWall?: boolean;
+}
+
 export function placeFeatures(
   grid: Cell[][],
   rooms: Room[],
   corridors: Corridor[],
   config: DungeonConfig,
   rng: SeededRandom,
+  options: FeatureOptions = {},
 ): Feature[] {
   const featureId = { value: 0 };
 
   const allFeatures: Feature[] = [];
 
-  const doorFeatures = placeDoors(grid, rooms, config, rng, featureId);
+  const doorFeatures = placeDoors(grid, rooms, config, rng, featureId, options.wallToWall);
   allFeatures.push(...doorFeatures);
 
-  const secretDoorFeatures = placeSecretDoors(grid, rng, featureId);
-  allFeatures.push(...secretDoorFeatures);
+  if (options.wallToWall) {
+    allFeatures.push(...placeDoorways(grid, corridors, config, rng, featureId));
+  } else {
+    const secretDoorFeatures = placeSecretDoors(grid, rng, featureId);
+    allFeatures.push(...secretDoorFeatures);
+  }
 
   const trapFeatures = placeTraps(grid, corridors, config, rng, featureId);
   allFeatures.push(...trapFeatures);

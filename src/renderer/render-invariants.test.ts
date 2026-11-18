@@ -1,5 +1,8 @@
 import { describe, test, expect } from "bun:test";
-import { generateDungeon } from "../engine/generate.ts";
+import { generateDungeon, generateFromBlueprint } from "../engine/generate.ts";
+import { normalizeBlueprint } from "../ai/blueprint.ts";
+import { radialPlans } from "../engine/radial-fixtures.ts";
+import { sectorOutline } from "../engine/sector.ts";
 import { CellType, isCaveShape, type Dungeon } from "../engine/types.ts";
 import { DEFAULT_CONFIG } from "../ai/schema.ts";
 import { getSketchOutlines, WALKABLE, extendsIntoRoom } from "./sketch.ts";
@@ -37,6 +40,11 @@ function sweep(): Array<[string, Dungeon]> {
         const label = `${shapes.join("+")} ${style} #${seed}`;
         out.push([label, generateDungeon(cfg({ room_shapes: [...shapes], layout_style: style, seed }))]);
       }
+    }
+  }
+  for (const [label, plan] of radialPlans()) {
+    for (const seed of [7, 91]) {
+      out.push([`radial ${label} #${seed}`, generateFromBlueprint(normalizeBlueprint(plan).blueprint, cfg({ seed }))]);
     }
   }
   return out;
@@ -81,6 +89,8 @@ describe("a room's drawn shape stays inside the space reserved for it", () => {
           );
         } else if (geo.type === "polygon") {
           for (const v of geo.vertices ?? []) corners.push([v.x, v.y]);
+        } else if (geo.type === "sector") {
+          for (const v of sectorOutline(geo.sector!)) corners.push([v.x, v.y]);
         } else if (geo.type === "path") {
           for (const r of geo.rects ?? []) corners.push([r.x, r.y], [r.x + r.width, r.y + r.height]);
         } else {

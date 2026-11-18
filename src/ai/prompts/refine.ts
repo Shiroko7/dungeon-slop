@@ -23,7 +23,8 @@ Available ops — every one takes an optional "reason":
   { "op": "connect",     "from": "...", "to": "...", "gating": "..." }
   { "op": "disconnect",  "from": "...", "to": "..." }
   { "op": "remove_room", "key": "..." }
-  { "op": "add_room",    "key": "...", "name": "...", "role": "...", "tier": 3, "size": "Medium", "wing": "...", "notes": "...", "connectTo": ["key-a"] }
+  { "op": "add_room",    "key": "...", "name": "...", "role": "...", "tier": 3, "size": "Medium", "wing": "...", "notes": "...", "connectTo": ["key-a"], "ring": 1, "sector": 4 }
+                                                                     "ring"/"sector" only on a "layout": "radial" plan
 
 WHAT TO LOOK FOR, in priority order:
 
@@ -44,6 +45,11 @@ RULES:
   that would change one.
 - Never propose an op that would strand a room with no connections.
 - Refer to rooms by their "key", exactly as given to you. A key you invent is a dropped op.
+- A plan with "layout": "radial" is drawn as a round centre room (ring 0) with
+  the others as slices of rings around it, in "sector" order clockwise from
+  twelve o'clock. Keep that structure: a slice touches the centre (or the slice
+  inside it) and its two neighbours, and a connection between rooms that do not
+  touch becomes a corridor round the outside. "tierDelta" does not move a slice.
 - If an image is provided, use it: judge the SHAPE of the map, the long empty runs, the clustering, the rooms that sit oddly alone. Say what you see.
 
 Respond with pure JSON only.`;
