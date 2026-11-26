@@ -11,6 +11,7 @@ import { join, resolve } from "node:path";
 import { ComfyClient, ComfyError } from "../src/assets/comfy.ts";
 import { generateAssets, generateVariants } from "../src/assets/generate.ts";
 import { AssetLibrary, type AssetQuery, type AssetRecord, type AssetStatus } from "../src/assets/library.ts";
+import { importAssetPack } from "../src/assets/import-pack.ts";
 import { KINDS, MOTIFS, STYLES, asMotif, composePrompt, isKind, isStyle, type KindPreset } from "../src/assets/presets.ts";
 import { contactSheet, type SheetBackground } from "../src/assets/sheet.ts";
 import { CLOUD_DEFAULTS, cloudTexture } from "../src/assets/procedural.ts";
@@ -23,6 +24,7 @@ const HELP = `assets — generate and organise map art with a local ComfyUI
   doctor                                   check ComfyUI, its custom nodes and models, and the library
   serve                                    start ComfyUI headless on :8188 (Ctrl+C to stop)
   presets                                  list kinds, styles and motifs
+  import-pack <manifest.json>              index curated atlas pieces for reuse in the CLI and editor
 
   generate <kind> <subject> [options]      generate and store assets
       --style <ink|painted|flat>           default ink
@@ -377,6 +379,11 @@ async function main(): Promise<void> {
   }
   const lib = new AssetLibrary();
   switch (command) {
+    case "import-pack": {
+      if (rest.length !== 1) fail("import-pack needs one pack manifest JSON file");
+      for (const asset of importAssetPack(lib, rest[0]!)) console.log(line(asset));
+      break;
+    }
     case "list": {
       const found = lib.list(query());
       for (const a of found) console.log(line(a));

@@ -2,8 +2,8 @@
 // Gemini CLI and Cursor read. Claude Code reads only `.claude/skills/`, so this
 // script writes a small pointer there for each shared skill.
 //
-//   bun run scripts/sync-skills.ts           write or refresh the pointers
-//   bun run scripts/sync-skills.ts --check  fail if any pointer is missing or stale
+//   bun run skills:sync          write or refresh the pointers
+//   bun run skills:sync --check  fail if any pointer is missing or stale
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -89,7 +89,7 @@ if (import.meta.main) {
   if (process.argv.includes("--check")) {
     const stale = staleFiles(root);
     if (stale.length) {
-      console.error(`Claude skill pointers are out of date. Run \`bun run scripts/sync-skills.ts\`.\n${stale.join("\n")}`);
+      console.error(`Claude skill pointers are out of date. Run \`bun run skills:sync\`.\n${stale.join("\n")}`);
       process.exit(1);
     }
     console.log("Claude skill pointers are up to date.");

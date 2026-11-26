@@ -1,4 +1,21 @@
-# Dungeon Slop workflow
+# Making playable maps for puzzle-slop
+
+Run the commands from the repository root. `bun run dungeon help` covers campaigns and saved dungeons, `bun run assets help` covers the art library, and `bun run map-art help` covers guides and VTT packaging.
+
+Task skills shared by every agent (Claude, Codex, Gemini and others) live in `.agents/skills/<name>/SKILL.md`: `dungeon`, `dungeon-design`, `assets`, `app-ui` and `verify`. If your tool does not load skills automatically, read the matching `SKILL.md` before that kind of task. Edit skills only there, then run `bun run skills:sync` to refresh the generated Claude pointers in `.claude/skills/`.
+
+On a fresh asset library, load the bundled winter set with `bun run assets import-pack examples/winter-fortress/source/asset-pack.json`. The source manifest, tags and sheets travel with the project. When a new map produces useful props or materials, keep their images, prompts and pack manifest together so the next agent can find and use them.
+
+1. **Choose the geometry.** For a new layout, use `bun run dungeon generate <campaignId> <blueprint.json> --seed <seed>`, then inspect it with `bun run dungeon show <dungeonId>`. For an art revision, start with the saved dungeon ID or the actual source UVTT. If the table has edited terrain or doors since export, carry those edits into the source you are painting.
+2. **Get a reference at the map's exact bounds.** Run `bun run map-art guide <source> --out out/guide.png`. If the UVTT already contains art, add `--reference out/original.webp` using the embedded image's file type. Open the images. The guide uses white for walls, teal for object outlines and amber for doors. Height changes appear as shifts in gray.
+3. **Look through the asset library first.** Search by subject or tag with `bun run assets list --text pine` or `bun run assets list --tag winter`. Inspect candidates together with `bun run assets sheet <id1> <id2> --out out/candidates.png`. Reuse a good fit by its asset ID. When a useful piece needs a companion, use its image as a style reference. Match camera angle, apparent scale, light direction and color to the scene. See the [winter pack](examples/winter-fortress/README.md) for a worked example.
+4. **Generate missing art.** Supply the guide or original image as a layout reference. Ask for a strictly overhead view, open crossings and doorways, and a gridless image at the map's aspect ratio. For a forest or a prop-heavy room, compose the ground and transparent objects separately. Place each trunk, doorway or raised platform at its source coordinates. The existing `bun run assets` CLI also provides a local ComfyUI workflow.
+5. **Keep directional sprites oriented.** For trees and other repeated props with painted light or a visible viewing angle, use independently drawn variants that share the same camera and light direction. Keep their authored orientation and vary the silhouette, canopy density and snow coverage. Avoid rotating or mirroring them for variety. Spread matching variants apart and check the group at token scale and in the 3D view.
+6. **Give natural features uneven spacing and scale.** Mix saplings, mature trees and intermediate sizes. Place them in loose groves with irregular gaps and clearings. Use paths, streams and terrain to guide the spacing. When repainting a playable map, vary crown sizes around existing trunk positions so they stay aligned with their sight blockers. Check the whole map for visible rows or repeated spacing.
+7. **Check alignment before export.** Compare the painting against the guide at full extent and token scale. In particular, inspect narrow passages, door endpoints, raised edges and any painted features that block movement. Matching image dimensions alone cannot establish alignment.
+8. **Package a new version.** Run `bun run map-art pack <source> --art out/painting.webp --out out/painted-map.uvtt --name "Painted map"`. The file carries the art, sight lines, doors and terrain together. In puzzle-slop, import the UVTT as a new scene to inspect it in 2D and 3D.
+
+The [winter fortress example](examples/winter-fortress/README.md) includes an importable scene, its source geometry, generated art sheets, prompts and a repeatable composition script.
 
 ## Revising an existing scene
 
@@ -6,3 +23,20 @@
 2. Apply each layout change at the same map coordinates in both views. Moving or resizing a prop also moves or resizes its 3D model, floor markings, shadows and any associated collision or sight blockers. Reuse a shared layout when available. Carry over the scene and layer IDs, placement bounds, tokens, drawings, doors, fog and terrain for art-only revisions.
 3. Package the UVTT and stage the changes in a copy of the actual scene. Update the 3D renderer's art selection if it uses a map image URL, content hash or asset ID that the revision changes. A fresh UVTT import can fall back to the painted map on the floor and miss the original scene's custom 3D entirely.
 4. Before review, open the staged scene in the VTT in both 2D and 3D. Inspect each changed feature at token scale from above and at eye level. Confirm the 3D view loads the intended geometry and textures, including any props that disappeared from the ground-only art. Confirm that the edit preserves the scene state outside its scope. Include the 2D and 3D checks in the handoff. If a check is blocked, report it as pending before calling the revision ready.
+
+
+## City scenes, interiors and 3D
+
+- Choose the visual style before generating production art. Name the reference and the target treatment in the prompts. Check a street crop, a representative room, and a prop sheet at token zoom for the same style, scale, light and palette.
+- Begin city geometry with the places people use. Put civic or religious compounds, markets, workshops, inns and private homes on distinct plots. Let historic routes, natural features and courtyards shape the streets. At map scale, look for repeated block silhouettes, evenly spaced tree stamps, and similar roof spans or heights.
+- Approve 2D sprites in isolation. A battle-map object needs a strict orthographic nadir camera. Check straight parallel edges, concentric circular rims, and contact points. Reject visible front panels, leaning edges and apparent height copied from a three-quarter view. Keep façade textures and top-down artwork as separate assets.
+- Fit each interior into a measured footprint on the street map. If the interior uses a finer grid, write down its scale and check the coordinate transform against the exterior. Switch floors with the surrounding city still visible. Test one player in the street and another inside the same building.
+- Design both landings and the run of each stair in the geometry. Generate a readable overhead tread asset and use actual treads in 3D. Check that the stair, opening and landings align in both views and that an owned token can travel each way. Place links by interacting with the map.
+- Use 3D massing for architecture. Check a street-level view for distinct storey heights, pitched roofs with eaves, and a legible entrance. Use existing 3D tree models where available. Build terrain-only layers for the city and rooms so standing models replace the painted view of the same objects.
+- Review the full city and a zoomed street, one roof-on exterior, and a building cutaway with the street and neighboring storeys visible. Take the 3D review at eye level as well as from above. Verify the suite, balcony, doorways, roof cutaways, lighting, stair traversal, and DM and player views before calling the result ready.
+
+## Optional 3D follow-up
+
+For a scene that has only 2D art, finish the playable map and check it in the VTT first. Then tell the user which 3D assets would add the most to that scene and ask whether they want any of them made. Favor reusable models for repeated assets such as trees, and dedicated materials for important vertical surfaces such as walls, cliffs and riverbanks. Suggest bespoke structures when they matter to play or define a landmark.
+
+For approved 3D work, keep the 2D version usable. Give exposed vertical faces their own textures and use a separate ground layer wherever a 3D model replaces a painted prop. Align models to the map's contact points and blockers. Check gates, banks and other height changes at a low camera angle.

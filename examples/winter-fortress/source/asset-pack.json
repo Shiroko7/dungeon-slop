@@ -1,0 +1,524 @@
+{
+  "version": 1,
+  "id": "winter-fortress",
+  "style": "painted",
+  "motif": "Frozen",
+  "prompts": "prompts.json",
+  "assets": [
+    {
+      "key": "drift-snow",
+      "subject": "Wind-rippled pale snow",
+      "kind": "floor",
+      "source": "materials.png",
+      "crop": [
+        16,
+        16,
+        596,
+        596
+      ],
+      "tileMode": "mirror",
+      "tags": [
+        "snow",
+        "ground",
+        "drift",
+        "winter",
+        "terrain"
+      ]
+    },
+    {
+      "key": "packed-trail",
+      "subject": "Packed snow and stony grit on a travelled winter road",
+      "kind": "floor",
+      "source": "materials.png",
+      "crop": [
+        643,
+        16,
+        596,
+        596
+      ],
+      "tileMode": "mirror",
+      "tags": [
+        "snow",
+        "path",
+        "road",
+        "grit",
+        "trail",
+        "terrain"
+      ]
+    },
+    {
+      "key": "woodland-floor",
+      "subject": "Snow-dusted woodland ground with dry needles and grasses",
+      "kind": "floor",
+      "source": "materials.png",
+      "crop": [
+        16,
+        643,
+        596,
+        596
+      ],
+      "tileMode": "mirror",
+      "tags": [
+        "snow",
+        "needles",
+        "forest",
+        "woodland",
+        "terrain"
+      ]
+    },
+    {
+      "key": "frozen-water",
+      "subject": "Fractured turquoise stream ice",
+      "kind": "floor",
+      "source": "materials.png",
+      "crop": [
+        643,
+        643,
+        596,
+        596
+      ],
+      "tileMode": "mirror",
+      "tags": [
+        "ice",
+        "water",
+        "river",
+        "moat",
+        "stream",
+        "terrain"
+      ]
+    },
+    {
+      "key": "spruce",
+      "subject": "Snow-laden mature spruce canopy",
+      "kind": "prop",
+      "source": "props.png",
+      "crop": [
+        30,
+        8,
+        449,
+        462
+      ],
+      "tags": [
+        "tree",
+        "spruce",
+        "evergreen",
+        "conifer",
+        "snow",
+        "canopy",
+        "forest"
+      ]
+    },
+    {
+      "key": "pine",
+      "subject": "Broad Japanese pine with snow on irregular boughs",
+      "kind": "prop",
+      "source": "props.png",
+      "crop": [
+        518,
+        28,
+        487,
+        423
+      ],
+      "tags": [
+        "tree",
+        "pine",
+        "evergreen",
+        "canopy",
+        "woodland"
+      ]
+    },
+    {
+      "key": "bare-tree",
+      "subject": "Bare winter deciduous tree with exposed branching crown",
+      "kind": "prop",
+      "source": "props.png",
+      "crop": [
+        1043,
+        12,
+        476,
+        451
+      ],
+      "tags": [
+        "tree",
+        "bare",
+        "deciduous",
+        "forest",
+        "branch"
+      ]
+    },
+    {
+      "key": "boulder",
+      "subject": "Snowcapped granite boulder",
+      "kind": "prop",
+      "source": "props.png",
+      "crop": [
+        38,
+        516,
+        438,
+        463
+      ],
+      "tags": [
+        "rock",
+        "boulder",
+        "stone",
+        "snow"
+      ]
+    },
+    {
+      "key": "stone-lantern",
+      "subject": "Lit stone tōrō lantern with a snow-covered roof",
+      "kind": "prop",
+      "source": "props.png",
+      "crop": [
+        589,
+        524,
+        359,
+        431
+      ],
+      "tags": [
+        "lantern",
+        "light",
+        "stone",
+        "road",
+        "japanese",
+        "toro"
+      ]
+    },
+    {
+      "key": "ox-cart",
+      "subject": "Old two-wheeled wooden ox-cart laden with sacks",
+      "kind": "prop",
+      "source": "props.png",
+      "crop": [
+        1129,
+        494,
+        293,
+        505
+      ],
+      "tags": [
+        "cart",
+        "wagon",
+        "transport",
+        "sacks",
+        "wood"
+      ]
+    },
+    {
+      "key": "arena",
+      "subject": "Round stone duelling platform with a vermilion ring and two stairs",
+      "kind": "prop",
+      "source": "landmarks.png",
+      "crop": [
+        63,
+        35,
+        496,
+        543
+      ],
+      "tags": [
+        "arena",
+        "training",
+        "platform",
+        "stone",
+        "duelling",
+        "circle",
+        "stairs"
+      ]
+    },
+    {
+      "key": "equipment-shed",
+      "subject": "Roofless equipment shed with plank floor, barrels and a north doorway",
+      "kind": "prop",
+      "source": "landmarks.png",
+      "crop": [
+        675,
+        118,
+        531,
+        389
+      ],
+      "tags": [
+        "building",
+        "shed",
+        "storage",
+        "wood",
+        "interior",
+        "floorplan"
+      ]
+    },
+    {
+      "key": "footbridge",
+      "subject": "Red lacquered wooden footbridge with side rails",
+      "kind": "prop",
+      "source": "landmarks.png",
+      "crop": [
+        225,
+        643,
+        182,
+        582
+      ],
+      "tags": [
+        "bridge",
+        "crossing",
+        "river",
+        "timber",
+        "red"
+      ]
+    },
+    {
+      "key": "torii",
+      "subject": "Vermilion torii gate with a dark, gently upturned cap",
+      "kind": "prop",
+      "source": "landmarks.png",
+      "crop": [
+        648,
+        865,
+        584,
+        127
+      ],
+      "tags": [
+        "gate",
+        "torii",
+        "shrine",
+        "timber",
+        "entry"
+      ]
+    },
+    {
+      "key": "brazier",
+      "subject": "Iron brazier with orange fire and glowing coals",
+      "kind": "prop",
+      "source": "dressing.png",
+      "crop": [
+        114,
+        110,
+        417,
+        454
+      ],
+      "tags": [
+        "fire",
+        "light",
+        "brazier",
+        "ember",
+        "iron"
+      ]
+    },
+    {
+      "key": "training-rack",
+      "subject": "Wooden practice equipment rack with bows and training swords",
+      "kind": "prop",
+      "source": "dressing.png",
+      "crop": [
+        706,
+        37,
+        438,
+        574
+      ],
+      "tags": [
+        "rack",
+        "weapons",
+        "wood",
+        "equipment",
+        "training"
+      ]
+    },
+    {
+      "key": "practice-post",
+      "subject": "Frosted straw-wrapped training post with a wooden crossarm",
+      "kind": "prop",
+      "source": "dressing.png",
+      "crop": [
+        104,
+        635,
+        426,
+        589
+      ],
+      "tags": [
+        "training",
+        "straw",
+        "pell",
+        "dummy",
+        "post"
+      ]
+    },
+    {
+      "key": "frosted-reeds",
+      "subject": "Sparse tuft of frost-tipped streambank reeds",
+      "kind": "decal",
+      "source": "dressing.png",
+      "crop": [
+        637,
+        677,
+        573,
+        504
+      ],
+      "tags": [
+        "reed",
+        "grass",
+        "frost",
+        "streambank",
+        "vegetation"
+      ]
+    },
+    {
+      "key": "gatehouse",
+      "subject": "Winter fortress rampart with paired gate towers, frozen moat and stone crossing",
+      "kind": "decal",
+      "source": "fortress.png",
+      "tags": [
+        "fortress",
+        "gatehouse",
+        "wall",
+        "moat",
+        "bridge",
+        "region",
+        "architecture"
+      ]
+    },
+    {
+      "key": "spruce-broad",
+      "subject": "Broad snowy blue spruce",
+      "kind": "prop",
+      "source": "winter-canopies.png",
+      "crop": [
+        42,
+        17,
+        363,
+        361
+      ],
+      "tags": [
+        "tree",
+        "canopy",
+        "forest",
+        "snow",
+        "spruce",
+        "light-northwest",
+        "fixed-orientation"
+      ]
+    },
+    {
+      "key": "spruce-open",
+      "subject": "Open branching spruce",
+      "kind": "prop",
+      "source": "winter-canopies.png",
+      "crop": [
+        439,
+        15,
+        372,
+        364
+      ],
+      "tags": [
+        "tree",
+        "canopy",
+        "forest",
+        "snow",
+        "spruce",
+        "light-northwest",
+        "fixed-orientation"
+      ]
+    },
+    {
+      "key": "spruce-dense",
+      "subject": "Dense dark spruce",
+      "kind": "prop",
+      "source": "winter-canopies.png",
+      "crop": [
+        853,
+        18,
+        361,
+        361
+      ],
+      "tags": [
+        "tree",
+        "canopy",
+        "forest",
+        "snow",
+        "spruce",
+        "light-northwest",
+        "fixed-orientation"
+      ]
+    },
+    {
+      "key": "pine-old",
+      "subject": "Old Japanese black pine",
+      "kind": "prop",
+      "source": "winter-canopies.png",
+      "crop": [
+        28,
+        425,
+        387,
+        343
+      ],
+      "tags": [
+        "tree",
+        "canopy",
+        "forest",
+        "snow",
+        "pine",
+        "light-northwest",
+        "fixed-orientation"
+      ]
+    },
+    {
+      "key": "pine-windswept",
+      "subject": "Wind-pruned Japanese pine",
+      "kind": "prop",
+      "source": "winter-canopies.png",
+      "crop": [
+        445,
+        422,
+        363,
+        344
+      ],
+      "tags": [
+        "tree",
+        "canopy",
+        "forest",
+        "snow",
+        "pine",
+        "light-northwest",
+        "fixed-orientation"
+      ]
+    },
+    {
+      "key": "pine-spreading",
+      "subject": "Spreading Japanese pine",
+      "kind": "prop",
+      "source": "winter-canopies.png",
+      "crop": [
+        842,
+        435,
+        384,
+        322
+      ],
+      "tags": [
+        "tree",
+        "canopy",
+        "forest",
+        "snow",
+        "pine",
+        "light-northwest",
+        "fixed-orientation"
+      ]
+    },
+    {
+      "key": "oak-frosted",
+      "subject": "Frosted oak with a sparse copper canopy",
+      "kind": "prop",
+      "source": "winter-canopies.png",
+      "crop": [
+        439,
+        805,
+        372,
+        368
+      ],
+      "tags": [
+        "tree",
+        "canopy",
+        "forest",
+        "snow",
+        "oak",
+        "light-northwest",
+        "fixed-orientation"
+      ]
+    }
+  ]
+}

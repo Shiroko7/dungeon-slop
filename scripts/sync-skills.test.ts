@@ -17,7 +17,7 @@ describe("shared agent skills", () => {
   });
 
   test("Claude pointers match the shared skills", () => {
-    // Fix with `bun run scripts/sync-skills.ts`.
+    // Fix with `bun run skills:sync`.
     expect(staleFiles(root)).toEqual([]);
   });
 
