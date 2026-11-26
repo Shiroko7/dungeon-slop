@@ -137,7 +137,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/api/campaigns
 
 Committed state lives in `notes.sqlite` at the repo root. Never use it as a fixture
 for destructive tests or migrations. Use isolated temporary/in-memory databases and
-mocked providers. Local verification recipes are in `.claude/skills/verify/SKILL.md`;
+mocked providers. Local verification recipes are in `.agents/skills/verify/SKILL.md`;
 PR-level acceptance requirements are in [the roadmap](ROADMAP.md#verification-and-pr-handoff).
 
 ---
