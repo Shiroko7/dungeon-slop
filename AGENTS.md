@@ -2,6 +2,8 @@
 
 Run the commands from the repository root. `bun run dungeon help` covers campaigns and saved dungeons, `bun run assets help` covers the art library, and `bun run map-art help` covers guides and VTT packaging.
 
+Task skills shared by every agent (Claude, Codex, Gemini and others) live in `.agents/skills/<name>/SKILL.md`: `dungeon`, `dungeon-design`, `assets`, `app-ui` and `verify`. If your tool does not load skills automatically, read the matching `SKILL.md` before that kind of task. Edit skills only there, then run `bun run skills:sync` to refresh the generated Claude pointers in `.claude/skills/`.
+
 On a fresh asset library, load the bundled winter set with `bun run assets import-pack examples/winter-fortress/source/asset-pack.json`. The source manifest, tags and sheets travel with the project. When a new map produces useful props or materials, keep their images, prompts and pack manifest together so the next agent can find and use them.
 
 1. **Choose the geometry.** For a new layout, use `bun run dungeon generate <campaignId> <blueprint.json> --seed <seed>`, then inspect it with `bun run dungeon show <dungeonId>`. For an art revision, start with the saved dungeon ID or the actual source UVTT. If the table has edited terrain or doors since export, carry those edits into the source you are painting.

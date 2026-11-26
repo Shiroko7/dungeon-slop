@@ -13,7 +13,8 @@
     "eval:retrieval": "bun run src/notes/eval/evaluate.ts",
     "dungeon": "bun run scripts/dungeon.ts",
     "assets": "bun run scripts/assets.ts",
-    "map-art": "bun run scripts/map-art.ts"
+    "map-art": "bun run scripts/map-art.ts",
+    "skills:sync": "bun run scripts/sync-skills.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
