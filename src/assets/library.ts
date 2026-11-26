@@ -13,7 +13,7 @@
  */
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 export const DEFAULT_LIBRARY_DIR = process.env.ASSET_LIBRARY_DIR ?? resolve(import.meta.dir, "../../assets/library");
@@ -127,28 +127,42 @@ export class AssetLibrary {
     name?: string;
     tags?: string[];
     notes?: string;
+    /** Applied only when a new library record is created. */
+    initialStatus?: AssetStatus;
   }): AssetRecord {
     const sha256 = createHash("sha256").update(input.png).digest("hex");
     const id = `${slug(input.kind, 10)}-${slug(input.name ?? input.subject, 28)}-${sha256.slice(0, 6)}`;
     // Same bytes for the same kind and subject (same seed and prompt): already stored.
     const existing = this.get(id);
-    if (existing) return existing;
-    const file = `${slug(input.kind)}/${slug(input.motif)}/${id}.png`;
+    if (existing) {
+      if (existing.sha256 !== sha256) throw new Error(`Content hash collision for ${id}`);
+      if (existsSync(this.path(existing))) return existing;
+    }
+    const file = existing?.file ?? `${slug(input.kind)}/${slug(input.motif)}/${id}.png`;
     const full = join(this.root, file);
     mkdirSync(dirname(full), { recursive: true });
-    writeFileSync(full, input.png);
+    try {
+      writeFileSync(full, input.png, { flag: "wx" });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      // A previous attempt may have written this file before its DB commit.
+      if (createHash("sha256").update(readFileSync(full)).digest("hex") !== sha256) {
+        throw new Error(`A different image already exists at ${full}`);
+      }
+    }
+    if (existing) return existing;
     const createdAt = new Date().toISOString();
     const tags = [...new Set((input.tags ?? []).map(normalizeTag).filter(Boolean))];
     this.db.transaction(() => {
       this.db
         .query(
           `INSERT INTO assets (id, kind, subject, style, motif, file, width, height, alpha, tileable, prompt, model, seed,
-             workflow, metrics, sha256, notes, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             workflow, metrics, sha256, notes, created_at, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(id, input.kind, input.subject, input.style, input.motif, file, input.width, input.height, input.alpha ? 1 : 0,
           input.tileable ? 1 : 0, input.prompt, input.model, input.seed, JSON.stringify(input.workflow),
-          JSON.stringify(input.metrics), sha256, input.notes ?? "", createdAt);
+          JSON.stringify(input.metrics), sha256, input.notes ?? "", createdAt, input.initialStatus ?? "new");
       for (const t of tags) this.db.query("INSERT OR IGNORE INTO asset_tags (asset_id, tag) VALUES (?, ?)").run(id, t);
     })();
     return this.get(id)!;

@@ -198,6 +198,12 @@ maps take that file). Its tests are invariants like the
 rest: a wall stands on every floor/stone edge and nowhere else, and every ordinary
 door closes its doorway from wall to wall.
 
+For agent-authored artwork, `bun run map-art guide` creates a registered reference
+from a saved dungeon or a UVTT. `bun run map-art pack` pairs the resulting painting
+with its playable geometry. The [agent workflow](AGENTS.md) covers asset lookup,
+image generation and export. The [winter fortress](examples/winter-fortress/README.md)
+includes a playable map and reusable terrain, buildings and props.
+
 ## Running it
 
 ```bash
